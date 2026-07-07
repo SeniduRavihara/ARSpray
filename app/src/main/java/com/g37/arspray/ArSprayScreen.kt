@@ -24,12 +24,16 @@ import com.g37.arspray.ui.ControlsPanel
 import com.g37.arspray.ui.StatusOverlay
 import com.google.ar.core.Config
 import com.google.ar.core.Frame
+import com.google.ar.core.Plane
 import com.google.ar.core.Session
+import com.google.ar.core.TrackingState
 import io.github.sceneview.ar.ARScene
+import io.github.sceneview.ar.ARSceneView
 import io.github.sceneview.ar.arcore.createAnchorOrNull
 import io.github.sceneview.ar.arcore.isValid
 import io.github.sceneview.ar.node.AnchorNode
 import io.github.sceneview.ar.rememberARCameraNode
+import io.github.sceneview.ar.scene.PlaneRenderer
 import io.github.sceneview.node.ModelNode
 import io.github.sceneview.node.SphereNode
 import io.github.sceneview.rememberEngine
@@ -80,7 +84,11 @@ fun ArSprayScreen() {
         if (currentFrame != null) {
             val hitResult = currentFrame
                 .hitTest(x, y)
-                .firstOrNull { it.isValid(depthPoint = true, point = true) }
+                .firstOrNull { hit ->
+                    val trackable = hit.trackable
+                    (trackable is Plane && trackable.trackingState == TrackingState.TRACKING) ||
+                    hit.isValid(depthPoint = true, point = true)
+                }
 
             hitResult?.createAnchorOrNull()?.let { anchor ->
                 val anchorNode = AnchorNode(engine = engine, anchor = anchor)
@@ -122,6 +130,9 @@ fun ArSprayScreen() {
             cameraNode = cameraNode,
             childNodes = childNodes,
             planeRenderer = true,
+            onViewCreated = {
+                planeRenderer.planeRendererMode = PlaneRenderer.PlaneRendererMode.RENDER_ALL
+            },
             sessionConfiguration = { session: Session, config: Config ->
                 configureArSession(session, config)
             },
@@ -139,7 +150,11 @@ fun ArSprayScreen() {
                             if (currentFrame != null) {
                                 val hitResult = currentFrame
                                     .hitTest(motionEvent.x, motionEvent.y)
-                                    .firstOrNull { it.isValid(depthPoint = true, point = true) }
+                                    .firstOrNull { hit ->
+                                        val trackable = hit.trackable
+                                        (trackable is Plane && trackable.trackingState == TrackingState.TRACKING) ||
+                                        hit.isValid(depthPoint = true, point = true)
+                                    }
 
                                 hitResult?.createAnchorOrNull()?.let { anchor ->
                                     val modelInstance =
