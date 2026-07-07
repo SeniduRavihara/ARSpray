@@ -3,6 +3,7 @@ package com.g37.arspray
 import android.Manifest
 import android.content.pm.PackageManager
 import android.os.Bundle
+import android.view.MotionEvent
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -28,10 +29,12 @@ import io.github.sceneview.ar.arcore.isValid
 import io.github.sceneview.ar.node.AnchorNode
 import io.github.sceneview.ar.rememberARCameraNode
 import io.github.sceneview.rememberEngine
+import io.github.sceneview.rememberMaterialLoader
 import io.github.sceneview.rememberModelLoader
 import io.github.sceneview.rememberNodes
 import io.github.sceneview.rememberOnGestureListener
 import io.github.sceneview.node.ModelNode
+import io.github.sceneview.node.SphereNode
 
 class MainActivity : ComponentActivity() {
 
@@ -98,12 +101,17 @@ fun ArSprayScreen() {
     val context = LocalContext.current
     val engine = rememberEngine()
     val modelLoader = rememberModelLoader(engine)
+    val materialLoader = rememberMaterialLoader(engine)
     val cameraNode = rememberARCameraNode(engine)
     val childNodes = rememberNodes()
     var frame by remember { mutableStateOf<Frame?>(null) }
     var isModelLoading by remember { mutableStateOf(true) }
 
     var duckModel by remember { mutableStateOf<ModelNode?>(null) }
+    
+    // AR Mode: true = Spray (Draw), false = Place (Duck)
+    var isSprayMode by remember { mutableStateOf(true) }
+    val sprayColor = Color.Magenta
 
     LaunchedEffect(modelLoader) {
         isModelLoading = true
@@ -133,8 +141,6 @@ fun ArSprayScreen() {
                 config.lightEstimationMode = Config.LightEstimationMode.AMBIENT_INTENSITY
                 config.depthMode = if (session.isDepthModeSupported(Config.DepthMode.AUTOMATIC))
                     Config.DepthMode.AUTOMATIC else Config.DepthMode.DISABLED
-                
-                // Ensure focus mode is set for better surface detection
                 config.focusMode = Config.FocusMode.AUTO
             },
             onSessionUpdated = { _, updatedFrame ->
@@ -142,39 +148,55 @@ fun ArSprayScreen() {
             },
             onGestureListener = rememberOnGestureListener(
                 onSingleTapConfirmed = { motionEvent, _ ->
-                    val currentModel = duckModel
-                    if (currentModel == null) {
-                        Toast.makeText(context, "Model not ready", Toast.LENGTH_SHORT).show()
-                        return@rememberOnGestureListener
-                    }
-                    
-                    val currentFrame = frame
-                    if (currentFrame == null) {
-                        Toast.makeText(context, "Scanning for surfaces...", Toast.LENGTH_SHORT).show()
-                        return@rememberOnGestureListener
-                    }
-
-                    // Try hit test with more permissive settings (include points if planes fail)
-                    val hitResults = currentFrame.hitTest(motionEvent.x, motionEvent.y)
-                    val hitResult = hitResults.firstOrNull { it.isValid(depthPoint = true, point = true) }
-                    
-                    if (hitResult != null) {
-                        val anchor = hitResult.createAnchorOrNull()
-                        if (anchor != null) {
-                            val anchorNode = AnchorNode(engine = engine, anchor = anchor)
-                            val modelInstance = modelLoader.createInstance(currentModel.modelInstance.asset)
-                            if (modelInstance != null) {
-                                val modelNode = ModelNode(modelInstance = modelInstance).apply {
-                                    // Scale it slightly to make sure it's visible (some models are tiny)
-                                    scale = io.github.sceneview.math.Scale(0.5f)
+                    if (!isSprayMode) {
+                        val currentModel = duckModel
+                        if (currentModel == null) {
+                            Toast.makeText(context, "Model not ready", Toast.LENGTH_SHORT).show()
+                        } else {
+                            val currentFrame = frame
+                            if (currentFrame != null) {
+                                val hitResults = currentFrame.hitTest(motionEvent.x, motionEvent.y)
+                                val hitResult = hitResults.firstOrNull { it.isValid(depthPoint = true, point = true) }
+                                
+                                if (hitResult != null) {
+                                    val anchor = hitResult.createAnchorOrNull()
+                                    if (anchor != null) {
+                                        val anchorNode = AnchorNode(engine = engine, anchor = anchor)
+                                        val modelInstance = modelLoader.createInstance(currentModel.modelInstance.asset)
+                                        if (modelInstance != null) {
+                                            val modelNode = ModelNode(modelInstance = modelInstance).apply {
+                                                scale = io.github.sceneview.math.Scale(0.5f)
+                                            }
+                                            anchorNode.addChildNode(modelNode)
+                                            childNodes += anchorNode
+                                        }
+                                    }
                                 }
-                                anchorNode.addChildNode(modelNode)
-                                childNodes += anchorNode
-                                Toast.makeText(context, "Duck placed!", Toast.LENGTH_SHORT).show()
                             }
                         }
-                    } else {
-                        Toast.makeText(context, "No surface detected here. Try scanning the floor.", Toast.LENGTH_SHORT).show()
+                    }
+                },
+                onMove = { _, motionEvent, _ ->
+                    if (isSprayMode) {
+                        val currentFrame = frame
+                        if (currentFrame != null) {
+                            val hitResults = currentFrame.hitTest(motionEvent.x, motionEvent.y)
+                            val hitResult = hitResults.firstOrNull { it.isValid(depthPoint = true, point = true) }
+                            
+                            if (hitResult != null) {
+                                val anchor = hitResult.createAnchorOrNull()
+                                if (anchor != null) {
+                                    val anchorNode = AnchorNode(engine = engine, anchor = anchor)
+                                    val sphereNode = SphereNode(
+                                        engine = engine,
+                                        radius = 0.02f,
+                                        materialInstance = materialLoader.createColorInstance(sprayColor)
+                                    )
+                                    anchorNode.addChildNode(sphereNode)
+                                    childNodes += anchorNode
+                                }
+                            }
+                        }
                     }
                 }
             )
@@ -191,13 +213,15 @@ fun ArSprayScreen() {
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             Text(
-                text = "AR Spray Mode",
+                text = if (isSprayMode) "AR Spray Mode (Drawing)" else "AR Place Mode (Duck)",
                 color = Color.White,
                 style = MaterialTheme.typography.titleMedium
             )
             Spacer(modifier = Modifier.height(4.dp))
             Text(
-                text = "1. Move phone to find a floor/table\n2. Tap to place a duck!",
+                text = if (isSprayMode) 
+                    "Move your finger on a surface to DRAW!" 
+                    else "Tap on a surface to PLACE A DUCK!",
                 color = Color.White.copy(alpha = 0.8f),
                 style = MaterialTheme.typography.bodySmall
             )
@@ -218,6 +242,15 @@ fun ArSprayScreen() {
                 .fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceEvenly
         ) {
+            Button(
+                onClick = { isSprayMode = !isSprayMode },
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = if (isSprayMode) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.primary
+                )
+            ) {
+                Text(if (isSprayMode) "Switch to Duck" else "Switch to Spray")
+            }
+            
             Button(
                 onClick = { childNodes.clear() },
                 colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
