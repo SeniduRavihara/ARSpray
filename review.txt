@@ -1,0 +1,32 @@
+diff --git a/.idea/appInsightsSettings.xml b/.idea/appInsightsSettings.xml
+index 371f2e2..e762975 100644
+--- a/.idea/appInsightsSettings.xml
++++ b/.idea/appInsightsSettings.xml
+@@ -6,14 +6,6 @@
+         <entry key="Firebase Crashlytics">
+           <value>
+             <InsightsFilterSettings>
+-              <option name="connection">
+-                <ConnectionSetting>
+-                  <option name="appId" value="PLACEHOLDER" />
+-                  <option name="mobileSdkAppId" value="" />
+-                  <option name="projectId" value="" />
+-                  <option name="projectNumber" value="" />
+-                </ConnectionSetting>
+-              </option>
+               <option name="signal" value="SIGNAL_UNSPECIFIED" />
+               <option name="timeIntervalDays" value="THIRTY_DAYS" />
+               <option name="visibilityType" value="ALL" />
+diff --git a/.idea/planningMode.xml b/.idea/planningMode.xml
+index 5e29652..9f86374 100644
+--- a/.idea/planningMode.xml
++++ b/.idea/planningMode.xml
+@@ -4,6 +4,8 @@
+     <option name="approvalStates">
+       <map>
+         <entry key="20260706-172847-7be62e1b-4fff-49f0-b569-1dc954aaf37f" value="true" />
++        <entry key="20260707-154644-db2167d0-12da-4d49-ba04-9d73f450a31f" value="true" />
++        <entry key="20260707-180415-85b92ba3-ad92-47b1-9457-2dae420e7424" value="true" />
+       </map>
+     </option>
+   </component>
