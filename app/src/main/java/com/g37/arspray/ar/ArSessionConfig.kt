@@ -19,4 +19,5 @@ fun configureArSession(session: Session, config: Config) {
     else
         Config.DepthMode.DISABLED
     config.focusMode = Config.FocusMode.AUTO
+    config.instantPlacementMode = Config.InstantPlacementMode.LOCAL_Y_UP
 }
