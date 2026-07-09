@@ -61,4 +61,5 @@ dependencies {
     implementation(libs.zxing.core)
     implementation(libs.java.websocket)
     implementation(libs.mlkit.barcode.scanning)
+    implementation("com.google.mlkit:digital-ink-recognition:19.0.0")
 }

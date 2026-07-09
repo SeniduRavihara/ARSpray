@@ -42,6 +42,7 @@ fun ControlsPanel(
     onWhiteboardWidthChange: (Float) -> Unit,
     whiteboardHeight: Float,
     onWhiteboardHeightChange: (Float) -> Unit,
+    onAiRecognize: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     Column(
@@ -63,7 +64,8 @@ fun ControlsPanel(
                 boardWidth = whiteboardWidth,
                 boardHeight = whiteboardHeight,
                 onWidthChange = onWhiteboardWidthChange,
-                onHeightChange = onWhiteboardHeightChange
+                onHeightChange = onWhiteboardHeightChange,
+                onAiRecognize = onAiRecognize
             )
             Spacer(modifier = Modifier.height(16.dp))
         }
@@ -113,7 +115,8 @@ private fun WhiteboardSizeCard(
     boardWidth: Float,
     boardHeight: Float,
     onWidthChange: (Float) -> Unit,
-    onHeightChange: (Float) -> Unit
+    onHeightChange: (Float) -> Unit,
+    onAiRecognize: () -> Unit
 ) {
     Column(
         modifier = Modifier
@@ -174,6 +177,16 @@ private fun WhiteboardSizeCard(
                     activeTrackColor = MaterialTheme.colorScheme.primary
                 )
             )
+        }
+        Spacer(modifier = Modifier.height(12.dp))
+        Button(
+            onClick = onAiRecognize,
+            colors = ButtonDefaults.buttonColors(
+                containerColor = Color(0xFF6200EE)
+            ),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text("AI AutoDraw (Sketch to 3D)", color = Color.White)
         }
     }
 }

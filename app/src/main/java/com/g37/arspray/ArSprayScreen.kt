@@ -75,6 +75,13 @@ import io.github.sceneview.rememberModelLoader
 import io.github.sceneview.rememberNodes
 import io.github.sceneview.rememberOnGestureListener
 import java.net.URI
+import com.google.mlkit.vision.digitalink.recognition.DigitalInkRecognition
+import com.google.mlkit.vision.digitalink.recognition.DigitalInkRecognitionModel
+import com.google.mlkit.vision.digitalink.recognition.DigitalInkRecognitionModelIdentifier
+import com.google.mlkit.vision.digitalink.recognition.DigitalInkRecognizerOptions
+import com.google.mlkit.vision.digitalink.recognition.Ink
+import com.google.mlkit.common.model.RemoteModelManager
+import com.google.mlkit.common.model.DownloadConditions
 
 enum class ArAppMode {
     LOBBY,
@@ -175,6 +182,10 @@ fun ArActiveScreen(
     var lastTouchY by remember { mutableStateOf<Float?>(null) }
     var lastTouchTime by remember { mutableLongStateOf(0L) }
 
+    // --- ML Kit Ink and Recognizer state ---
+    var inkBuilder by remember { mutableStateOf(Ink.builder()) }
+    var currentStrokeBuilder by remember { mutableStateOf<Ink.Stroke.Builder?>(null) }
+
     // Automatically update whiteboard dimensions when parameters change
     LaunchedEffect(whiteboardWidth, whiteboardHeight, whiteboardNode) {
         whiteboardNode?.scale = io.github.sceneview.math.Scale(whiteboardWidth, whiteboardHeight, 0.02f)
@@ -200,16 +211,27 @@ fun ArActiveScreen(
     val drawPointAt = { x: Float, y: Float ->
         val currentFrame = frame
         val board = whiteboardNode
+        val session = arSession
         if (currentFrame != null) {
-            val hitResult = currentFrame
+            var hitResult = currentFrame
                 .hitTest(x, y)
                 .firstOrNull { hit ->
                     val trackable = hit.trackable
                     (trackable is Plane && trackable.trackingState == TrackingState.TRACKING) ||
                     hit.isValid(depthPoint = true, point = true, instantPlacementPoint = true)
                 }
+            if (hitResult == null) {
+                hitResult = currentFrame.hitTest(x, y).firstOrNull()
+            }
 
-            hitResult?.createAnchorOrNull()?.let { anchor ->
+            var anchor = hitResult?.createAnchorOrNull()
+            if (anchor == null && session != null) {
+                val cameraPose = currentFrame.camera.displayOrientedPose
+                val fallbackPose = cameraPose.compose(com.google.ar.core.Pose.makeTranslation(0f, 0f, -1.0f))
+                anchor = session.createAnchor(fallbackPose)
+            }
+
+            anchor?.let { anchor ->
                 if (isWhiteboardMode && board != null) {
                     val tempAnchorNode = AnchorNode(engine = engine, anchor = anchor)
                     val worldPos = tempAnchorNode.worldPosition
@@ -229,6 +251,16 @@ fun ArActiveScreen(
                         }
 
                         board.addChildNode(sphereNode)
+
+                        // Add point to current stroke builder
+                        var stroke = currentStrokeBuilder
+                        if (stroke == null) {
+                            stroke = Ink.Stroke.builder()
+                            currentStrokeBuilder = stroke
+                        }
+                        stroke.addPoint(
+                            Ink.Point.create(localPos.x * 1000f, localPos.y * 1000f, System.currentTimeMillis())
+                        )
 
                         if (appMode != ArAppMode.SOLO) {
                             val syncNode = ArSyncNode(
@@ -381,6 +413,8 @@ fun ArActiveScreen(
                                     } else {
                                         resolvedNode.clearChildNodes()
                                     }
+                                    inkBuilder = Ink.builder()
+                                    currentStrokeBuilder = null
                                 },
                                 onConnectionStateChanged = { connected ->
                                     connectionState = connected
@@ -400,16 +434,27 @@ fun ArActiveScreen(
                     if (isWhiteboardMode && whiteboardNode == null) {
                         // Place Whiteboard
                         val currentFrame = frame
+                        val session = arSession
                         if (currentFrame != null) {
-                            val hitResult = currentFrame
+                            var hitResult = currentFrame
                                 .hitTest(motionEvent.x, motionEvent.y)
                                 .firstOrNull { hit ->
                                     val trackable = hit.trackable
                                     (trackable is Plane && trackable.trackingState == TrackingState.TRACKING) ||
                                     hit.isValid(depthPoint = true, point = true, instantPlacementPoint = true)
                                 }
+                            if (hitResult == null) {
+                                hitResult = currentFrame.hitTest(motionEvent.x, motionEvent.y).firstOrNull()
+                            }
 
-                            hitResult?.createAnchorOrNull()?.let { anchor ->
+                            var anchor = hitResult?.createAnchorOrNull()
+                            if (anchor == null && session != null) {
+                                val cameraPose = currentFrame.camera.displayOrientedPose
+                                val fallbackPose = cameraPose.compose(com.google.ar.core.Pose.makeTranslation(0f, 0f, -1.0f))
+                                anchor = session.createAnchor(fallbackPose)
+                            }
+
+                            anchor?.let { anchor ->
                                 val board = CubeNode(
                                     engine = engine,
                                     materialInstance = materialLoader.createColorInstance(Color(0xFFF5F5F5))
@@ -474,6 +519,8 @@ fun ArActiveScreen(
                                                     },
                                                     onRoomCleared = {
                                                         board.clearChildNodes()
+                                                        inkBuilder = Ink.builder()
+                                                        currentStrokeBuilder = null
                                                     },
                                                     onConnectionStateChanged = { connected ->
                                                         connectionState = connected
@@ -497,16 +544,27 @@ fun ArActiveScreen(
                             Toast.makeText(context, "Model not ready", Toast.LENGTH_SHORT).show()
                         } else {
                             val currentFrame = frame
+                            val session = arSession
                             if (currentFrame != null) {
-                                val hitResult = currentFrame
+                                var hitResult = currentFrame
                                     .hitTest(motionEvent.x, motionEvent.y)
                                     .firstOrNull { hit ->
                                         val trackable = hit.trackable
                                         (trackable is Plane && trackable.trackingState == TrackingState.TRACKING) ||
                                         hit.isValid(depthPoint = true, point = true, instantPlacementPoint = true)
                                     }
+                                if (hitResult == null) {
+                                    hitResult = currentFrame.hitTest(motionEvent.x, motionEvent.y).firstOrNull()
+                                }
 
-                                hitResult?.createAnchorOrNull()?.let { anchor ->
+                                var anchor = hitResult?.createAnchorOrNull()
+                                if (anchor == null && session != null) {
+                                    val cameraPose = currentFrame.camera.displayOrientedPose
+                                    val fallbackPose = cameraPose.compose(com.google.ar.core.Pose.makeTranslation(0f, 0f, -1.0f))
+                                    anchor = session.createAnchor(fallbackPose)
+                                }
+
+                                anchor?.let { anchor ->
                                     val tempAnchorNode = AnchorNode(engine = engine, anchor = anchor)
                                     val worldPos = tempAnchorNode.worldPosition
                                     val localPos = (board.worldToLocal * dev.romainguy.kotlin.math.Float4(worldPos, 1f)).xyz
@@ -616,16 +674,27 @@ fun ArActiveScreen(
                                 Toast.makeText(context, "Model not ready", Toast.LENGTH_SHORT).show()
                             } else {
                                 val currentFrame = frame
+                                val session = arSession
                                 if (currentFrame != null) {
-                                    val hitResult = currentFrame
+                                    var hitResult = currentFrame
                                         .hitTest(motionEvent.x, motionEvent.y)
                                         .firstOrNull { hit ->
                                             val trackable = hit.trackable
                                             (trackable is Plane && trackable.trackingState == TrackingState.TRACKING) ||
                                             hit.isValid(depthPoint = true, point = true, instantPlacementPoint = true)
                                         }
+                                    if (hitResult == null) {
+                                        hitResult = currentFrame.hitTest(motionEvent.x, motionEvent.y).firstOrNull()
+                                    }
 
-                                    hitResult?.createAnchorOrNull()?.let { anchor ->
+                                    var anchor = hitResult?.createAnchorOrNull()
+                                    if (anchor == null && session != null) {
+                                        val cameraPose = currentFrame.camera.displayOrientedPose
+                                        val fallbackPose = cameraPose.compose(com.google.ar.core.Pose.makeTranslation(0f, 0f, -1.0f))
+                                        anchor = session.createAnchor(fallbackPose)
+                                    }
+
+                                    anchor?.let { anchor ->
                                         val modelInstance = modelLoader.createInstance(currentModel.modelInstance.asset)
                                         if (modelInstance != null) {
                                             val modelNode = ModelNode(modelInstance = modelInstance).apply {
@@ -671,6 +740,15 @@ fun ArActiveScreen(
 
                         val endX = motionEvent.x
                         val endY = motionEvent.y
+
+                        if (isWhiteboardMode && whiteboardNode != null) {
+                            if (timeDelta > 150L || currentStrokeBuilder == null) {
+                                currentStrokeBuilder?.let {
+                                    inkBuilder.addStroke(it.build())
+                                }
+                                currentStrokeBuilder = Ink.Stroke.builder()
+                            }
+                        }
 
                         interpolateAndDraw(
                             startX = lastTouchX,
@@ -763,6 +841,181 @@ fun ArActiveScreen(
             )
         }
 
+        val onAiRecognize = {
+            currentStrokeBuilder?.let {
+                inkBuilder.addStroke(it.build())
+                currentStrokeBuilder = null
+            }
+
+            val ink = inkBuilder.build()
+            if (ink.strokes.isEmpty()) {
+                Toast.makeText(context, "Please draw something on the whiteboard first!", Toast.LENGTH_SHORT).show()
+            } else {
+                val modelIdentifier = DigitalInkRecognitionModelIdentifier.fromLanguageTag("zxx-Zsym-x-autodraw")
+                if (modelIdentifier == null) {
+                    Toast.makeText(context, "AutoDraw model identifier not found", Toast.LENGTH_SHORT).show()
+                } else {
+                    val model = DigitalInkRecognitionModel.builder(modelIdentifier).build()
+                    val modelManager = RemoteModelManager.getInstance()
+
+                    syncStatusText = "Checking AI Sketch Model..."
+                    modelManager.isModelDownloaded(model)
+                        .addOnSuccessListener { downloaded ->
+                            if (downloaded) {
+                                syncStatusText = "AI is analyzing your sketch..."
+                                val recognizer = DigitalInkRecognition.getClient(
+                                    DigitalInkRecognizerOptions.builder(model).build()
+                                )
+                                recognizer.recognize(ink)
+                                    .addOnSuccessListener { result ->
+                                        syncStatusText = null
+                                        val candidate = result.candidates.firstOrNull()?.text?.lowercase() ?: ""
+                                        if (candidate == "duck") {
+                                            Toast.makeText(context, "AI recognized a Duck! Spawning 3D model...", Toast.LENGTH_LONG).show()
+                                            
+                                            if (appMode == ArAppMode.SOLO) {
+                                                whiteboardNode?.clearChildNodes()
+                                            } else {
+                                                syncClient?.sendClear()
+                                            }
+                                            inkBuilder = Ink.builder()
+
+                                            var minX = Float.MAX_VALUE
+                                            var maxX = -Float.MAX_VALUE
+                                            var minY = Float.MAX_VALUE
+                                            var maxY = -Float.MAX_VALUE
+                                            for (stroke in ink.strokes) {
+                                                for (pt in stroke.pointsInGlobalCoordinates) {
+                                                    val xMeters = pt.x / 1000f
+                                                    val yMeters = pt.y / 1000f
+                                                    if (xMeters < minX) minX = xMeters
+                                                    if (xMeters > maxX) maxX = xMeters
+                                                    if (yMeters < minY) minY = yMeters
+                                                    if (yMeters > maxY) maxY = yMeters
+                                                }
+                                            }
+                                            val centerX = if (minX != Float.MAX_VALUE) (minX + maxX) / 2f else 0f
+                                            val centerY = if (minY != Float.MAX_VALUE) (minY + maxY) / 2f else 0f
+
+                                            val currentModel = duckModel
+                                            val board = whiteboardNode
+                                            if (currentModel != null && board != null) {
+                                                val modelInstance = modelLoader.createInstance(currentModel.modelInstance.asset)
+                                                if (modelInstance != null) {
+                                                    val modelNode = ModelNode(modelInstance = modelInstance).apply {
+                                                        scale = io.github.sceneview.math.Scale(0.5f)
+                                                        position = Position(centerX, centerY, 0f)
+                                                    }
+                                                    board.addChildNode(modelNode)
+
+                                                    if (appMode != ArAppMode.SOLO) {
+                                                        val syncNode = ArSyncNode(
+                                                            type = "duck",
+                                                            posX = centerX,
+                                                            posY = centerY,
+                                                            posZ = 0f,
+                                                            scale = 0.5f,
+                                                            colorHex = ""
+                                                        )
+                                                        syncClient?.sendNode(syncNode)
+                                                    }
+                                                }
+                                            }
+                                        } else {
+                                            Toast.makeText(context, "AI recognized '$candidate', but only 'duck' is supported for 3D placement.", Toast.LENGTH_LONG).show()
+                                        }
+                                    }
+                                    .addOnFailureListener { e ->
+                                        syncStatusText = null
+                                        Toast.makeText(context, "Recognition failed: ${e.message}", Toast.LENGTH_SHORT).show()
+                                    }
+                            } else {
+                                syncStatusText = "Downloading AI Model (2MB)..."
+                                modelManager.download(model, DownloadConditions.Builder().build())
+                                    .addOnSuccessListener {
+                                        syncStatusText = "AI Model downloaded! Analyzing..."
+                                        val recognizer = DigitalInkRecognition.getClient(
+                                            DigitalInkRecognizerOptions.builder(model).build()
+                                        )
+                                        recognizer.recognize(ink)
+                                            .addOnSuccessListener { result ->
+                                                syncStatusText = null
+                                                val candidate = result.candidates.firstOrNull()?.text?.lowercase() ?: ""
+                                                if (candidate == "duck") {
+                                                    Toast.makeText(context, "AI recognized a Duck! Spawning 3D model...", Toast.LENGTH_LONG).show()
+                                                    
+                                                    if (appMode == ArAppMode.SOLO) {
+                                                        whiteboardNode?.clearChildNodes()
+                                                    } else {
+                                                        syncClient?.sendClear()
+                                                    }
+                                                    inkBuilder = Ink.builder()
+
+                                                    var minX = Float.MAX_VALUE
+                                                    var maxX = -Float.MAX_VALUE
+                                                    var minY = Float.MAX_VALUE
+                                                    var maxY = -Float.MAX_VALUE
+                                                    for (stroke in ink.strokes) {
+                                                        for (pt in stroke.pointsInGlobalCoordinates) {
+                                                            val xMeters = pt.x / 1000f
+                                                            val yMeters = pt.y / 1000f
+                                                            if (xMeters < minX) minX = xMeters
+                                                            if (xMeters > maxX) maxX = xMeters
+                                                            if (yMeters < minY) minY = yMeters
+                                                            if (yMeters > maxY) maxY = yMeters
+                                                        }
+                                                    }
+                                                    val centerX = if (minX != Float.MAX_VALUE) (minX + maxX) / 2f else 0f
+                                                    val centerY = if (minY != Float.MAX_VALUE) (minY + maxY) / 2f else 0f
+
+                                                    val currentModel = duckModel
+                                                    val board = whiteboardNode
+                                                    if (currentModel != null && board != null) {
+                                                        val modelInstance = modelLoader.createInstance(currentModel.modelInstance.asset)
+                                                        if (modelInstance != null) {
+                                                            val modelNode = ModelNode(modelInstance = modelInstance).apply {
+                                                                scale = io.github.sceneview.math.Scale(0.5f)
+                                                                position = Position(centerX, centerY, 0f)
+                                                            }
+                                                            board.addChildNode(modelNode)
+
+                                                            if (appMode != ArAppMode.SOLO) {
+                                                                val syncNode = ArSyncNode(
+                                                                    type = "duck",
+                                                                    posX = centerX,
+                                                                    posY = centerY,
+                                                                    posZ = 0f,
+                                                                    scale = 0.5f,
+                                                                    colorHex = ""
+                                                                )
+                                                                syncClient?.sendNode(syncNode)
+                                                            }
+                                                        }
+                                                    }
+                                                } else {
+                                                    Toast.makeText(context, "AI recognized '$candidate', but only 'duck' is supported for 3D placement.", Toast.LENGTH_LONG).show()
+                                                }
+                                            }
+                                            .addOnFailureListener { e ->
+                                                syncStatusText = null
+                                                Toast.makeText(context, "Recognition failed: ${e.message}", Toast.LENGTH_SHORT).show()
+                                            }
+                                    }
+                                    .addOnFailureListener { e ->
+                                        syncStatusText = null
+                                        Toast.makeText(context, "Failed to download model: ${e.message}", Toast.LENGTH_SHORT).show()
+                                    }
+                            }
+                        }
+                        .addOnFailureListener { e ->
+                            syncStatusText = null
+                            Toast.makeText(context, "Error checking model: ${e.message}", Toast.LENGTH_SHORT).show()
+                        }
+                }
+            }
+            Unit
+        }
+
         // Bottom Controls
         Column(
             modifier = Modifier.align(Alignment.BottomCenter)
@@ -776,6 +1029,8 @@ fun ArActiveScreen(
                     if (appMode == ArAppMode.SOLO) {
                         if (isWhiteboardMode) {
                             whiteboardNode?.clearChildNodes()
+                            inkBuilder = Ink.builder()
+                            currentStrokeBuilder = null
                         } else {
                             childNodes.clear()
                         }
@@ -791,12 +1046,15 @@ fun ArActiveScreen(
                         whiteboardAnchorNode?.let { childNodes -= it }
                         whiteboardNode = null
                         whiteboardAnchorNode = null
+                        inkBuilder = Ink.builder()
+                        currentStrokeBuilder = null
                     }
                 },
                 whiteboardWidth = whiteboardWidth,
                 onWhiteboardWidthChange = { whiteboardWidth = it },
                 whiteboardHeight = whiteboardHeight,
-                onWhiteboardHeightChange = { whiteboardHeight = it }
+                onWhiteboardHeightChange = { whiteboardHeight = it },
+                onAiRecognize = onAiRecognize
             )
             
             Button(
