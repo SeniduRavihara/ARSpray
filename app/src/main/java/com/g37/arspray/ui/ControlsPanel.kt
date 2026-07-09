@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -35,6 +36,12 @@ fun ControlsPanel(
     onBrushSizeChange: (Float) -> Unit,
     onToggleMode: () -> Unit,
     onClearAll: () -> Unit,
+    isWhiteboardMode: Boolean,
+    onToggleWhiteboardMode: () -> Unit,
+    whiteboardWidth: Float,
+    onWhiteboardWidthChange: (Float) -> Unit,
+    whiteboardHeight: Float,
+    onWhiteboardHeightChange: (Float) -> Unit,
     modifier: Modifier = Modifier
 ) {
     Column(
@@ -43,10 +50,20 @@ fun ControlsPanel(
             .fillMaxWidth(),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        if (isSprayMode) {
+        if (isSprayMode && !isWhiteboardMode) {
             BrushSizeCard(
                 brushSize = brushSize,
                 onBrushSizeChange = onBrushSizeChange
+            )
+            Spacer(modifier = Modifier.height(16.dp))
+        }
+
+        if (isWhiteboardMode) {
+            WhiteboardSizeCard(
+                boardWidth = whiteboardWidth,
+                boardHeight = whiteboardHeight,
+                onWidthChange = onWhiteboardWidthChange,
+                onHeightChange = onWhiteboardHeightChange
             )
             Spacer(modifier = Modifier.height(16.dp))
         }
@@ -68,6 +85,18 @@ fun ControlsPanel(
             }
 
             Button(
+                onClick = onToggleWhiteboardMode,
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = if (isWhiteboardMode)
+                        Color(0xFF4CAF50) // Green when active
+                    else
+                        MaterialTheme.colorScheme.surfaceVariant
+                )
+            ) {
+                Text(if (isWhiteboardMode) "Whiteboard: ON" else "Whiteboard: OFF")
+            }
+
+            Button(
                 onClick = onClearAll,
                 colors = ButtonDefaults.buttonColors(
                     containerColor = MaterialTheme.colorScheme.error
@@ -75,6 +104,76 @@ fun ControlsPanel(
             ) {
                 Text("Clear All")
             }
+        }
+    }
+}
+
+@Composable
+private fun WhiteboardSizeCard(
+    boardWidth: Float,
+    boardHeight: Float,
+    onWidthChange: (Float) -> Unit,
+    onHeightChange: (Float) -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 24.dp)
+            .background(Color.Black.copy(alpha = 0.6f), RoundedCornerShape(12.dp))
+            .padding(16.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Text(
+            text = "Whiteboard Dimensions",
+            color = Color.White,
+            style = MaterialTheme.typography.titleSmall,
+            modifier = Modifier.align(Alignment.Start)
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = "Width: %.1f m".format(boardWidth),
+                color = Color.White,
+                style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier.width(90.dp)
+            )
+            Slider(
+                value = boardWidth,
+                onValueChange = onWidthChange,
+                valueRange = 0.5f..3.0f,
+                modifier = Modifier.weight(1f),
+                colors = SliderDefaults.colors(
+                    thumbColor = MaterialTheme.colorScheme.primary,
+                    activeTrackColor = MaterialTheme.colorScheme.primary
+                )
+            )
+        }
+        Spacer(modifier = Modifier.height(4.dp))
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = "Height: %.1f m".format(boardHeight),
+                color = Color.White,
+                style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier.width(90.dp)
+            )
+            Slider(
+                value = boardHeight,
+                onValueChange = onHeightChange,
+                valueRange = 0.5f..2.5f,
+                modifier = Modifier.weight(1f),
+                colors = SliderDefaults.colors(
+                    thumbColor = MaterialTheme.colorScheme.primary,
+                    activeTrackColor = MaterialTheme.colorScheme.primary
+                )
+            )
         }
     }
 }

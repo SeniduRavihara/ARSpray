@@ -68,6 +68,7 @@ import io.github.sceneview.ar.scene.PlaneRenderer
 import io.github.sceneview.math.Position
 import io.github.sceneview.node.ModelNode
 import io.github.sceneview.node.SphereNode
+import io.github.sceneview.node.CubeNode
 import io.github.sceneview.rememberEngine
 import io.github.sceneview.rememberMaterialLoader
 import io.github.sceneview.rememberModelLoader
@@ -162,10 +163,22 @@ fun ArActiveScreen(
     val sprayColor = Color.Magenta
     var brushSize by remember { mutableFloatStateOf(0.02f) }
 
+    // --- Whiteboard state ---
+    var isWhiteboardMode by remember { mutableStateOf(false) }
+    var whiteboardNode by remember { mutableStateOf<CubeNode?>(null) }
+    var whiteboardAnchorNode by remember { mutableStateOf<AnchorNode?>(null) }
+    var whiteboardWidth by remember { mutableFloatStateOf(1.2f) }
+    var whiteboardHeight by remember { mutableFloatStateOf(0.9f) }
+
     // --- Gesture tracking state (for stroke interpolation) ---
     var lastTouchX by remember { mutableStateOf<Float?>(null) }
     var lastTouchY by remember { mutableStateOf<Float?>(null) }
     var lastTouchTime by remember { mutableLongStateOf(0L) }
+
+    // Automatically update whiteboard dimensions when parameters change
+    LaunchedEffect(whiteboardWidth, whiteboardHeight, whiteboardNode) {
+        whiteboardNode?.scale = io.github.sceneview.math.Scale(whiteboardWidth, whiteboardHeight, 0.02f)
+    }
 
     // --- Shared Anchor & Sync State ---
     var sharedBaseNode by remember { mutableStateOf<CloudAnchorNode?>(null) }
@@ -186,6 +199,7 @@ fun ArActiveScreen(
     // Performs a hit-test at the given screen coordinate and spawns a spray sphere
     val drawPointAt = { x: Float, y: Float ->
         val currentFrame = frame
+        val board = whiteboardNode
         if (currentFrame != null) {
             val hitResult = currentFrame
                 .hitTest(x, y)
@@ -196,35 +210,69 @@ fun ArActiveScreen(
                 }
 
             hitResult?.createAnchorOrNull()?.let { anchor ->
-                val sphereNode = SphereNode(
-                    engine = engine,
-                    radius = brushSize,
-                    materialInstance = materialLoader.createColorInstance(sprayColor)
-                )
+                if (isWhiteboardMode && board != null) {
+                    val tempAnchorNode = AnchorNode(engine = engine, anchor = anchor)
+                    val worldPos = tempAnchorNode.worldPosition
+                    val localPos = (board.worldToLocal * dev.romainguy.kotlin.math.Float4(worldPos, 1f)).xyz
+                    val halfWidth = whiteboardWidth / 2f
+                    val halfHeight = whiteboardHeight / 2f
 
-                if (appMode == ArAppMode.SOLO) {
-                    val anchorNode = AnchorNode(engine = engine, anchor = anchor)
-                    anchorNode.addChildNode(sphereNode)
-                    childNodes += anchorNode
+                    if (localPos.x >= -halfWidth && localPos.x <= halfWidth &&
+                        localPos.y >= -halfHeight && localPos.y <= halfHeight) {
+
+                        val sphereNode = SphereNode(
+                            engine = engine,
+                            radius = brushSize,
+                            materialInstance = materialLoader.createColorInstance(sprayColor)
+                        ).apply {
+                            position = io.github.sceneview.math.Position(localPos.x, localPos.y, 0f)
+                        }
+
+                        board.addChildNode(sphereNode)
+
+                        if (appMode != ArAppMode.SOLO) {
+                            val syncNode = ArSyncNode(
+                                type = "sphere",
+                                posX = localPos.x,
+                                posY = localPos.y,
+                                posZ = 0f,
+                                scale = brushSize,
+                                colorHex = "#FF00FF"
+                            )
+                            syncClient?.sendNode(syncNode)
+                        }
+                    }
                 } else {
-                    val baseNode = sharedBaseNode
-                    if (baseNode != null) {
-                        // Position relative to parent base anchor is calculated automatically by setting worldPosition
-                        val tempAnchorNode = AnchorNode(engine = engine, anchor = anchor)
-                        sphereNode.worldPosition = tempAnchorNode.worldPosition
-                        baseNode.addChildNode(sphereNode)
+                    val sphereNode = SphereNode(
+                        engine = engine,
+                        radius = brushSize,
+                        materialInstance = materialLoader.createColorInstance(sprayColor)
+                    )
 
-                        // Send coordinate relative to shared anchor to the server
-                        val relativePos = sphereNode.position
-                        val syncNode = ArSyncNode(
-                            type = "sphere",
-                            posX = relativePos.x,
-                            posY = relativePos.y,
-                            posZ = relativePos.z,
-                            scale = brushSize,
-                            colorHex = "#FF00FF"
-                        )
-                        syncClient?.sendNode(syncNode)
+                    if (appMode == ArAppMode.SOLO) {
+                        val anchorNode = AnchorNode(engine = engine, anchor = anchor)
+                        anchorNode.addChildNode(sphereNode)
+                        childNodes += anchorNode
+                    } else {
+                        val baseNode = sharedBaseNode
+                        if (baseNode != null) {
+                            // Position relative to parent base anchor is calculated automatically by setting worldPosition
+                            val tempAnchorNode = AnchorNode(engine = engine, anchor = anchor)
+                            sphereNode.worldPosition = tempAnchorNode.worldPosition
+                            baseNode.addChildNode(sphereNode)
+
+                            // Send coordinate relative to shared anchor to the server
+                            val relativePos = sphereNode.position
+                            val syncNode = ArSyncNode(
+                                type = "sphere",
+                                posX = relativePos.x,
+                                posY = relativePos.y,
+                                posZ = relativePos.z,
+                                scale = brushSize,
+                                colorHex = "#FF00FF"
+                            )
+                            syncClient?.sendNode(syncNode)
+                        }
                     }
                 }
             }
@@ -279,6 +327,23 @@ fun ArActiveScreen(
                             childNodes += resolvedNode
                             syncStatusText = null
                             
+                            val board = if (isWhiteboardMode) {
+                                CubeNode(
+                                    engine = engine,
+                                    materialInstance = materialLoader.createColorInstance(Color(0xFFF5F5F5))
+                                ).apply {
+                                    scale = io.github.sceneview.math.Scale(whiteboardWidth, whiteboardHeight, 0.02f)
+                                    lookAt(cameraNode.worldPosition)
+                                    val rot = rotation
+                                    rotation = io.github.sceneview.math.Rotation(0f, rot.y, 0f)
+                                }
+                            } else null
+
+                            if (board != null) {
+                                whiteboardNode = board
+                                resolvedNode.addChildNode(board)
+                            }
+                            
                             // Initialize guest socket client
                             val uri = URI("ws://$serverIp:8080")
                             val client = ArSyncClient(
@@ -286,6 +351,7 @@ fun ArActiveScreen(
                                 roomId = activeRoomId!!,
                                 onNodeReceived = { syncNode ->
                                     val nodeRadius = syncNode.scale
+                                    val targetParent = board ?: resolvedNode
                                     if (syncNode.type == "sphere") {
                                         val sphereNode = SphereNode(
                                             engine = engine,
@@ -294,7 +360,7 @@ fun ArActiveScreen(
                                         ).apply {
                                             position = Position(syncNode.posX, syncNode.posY, syncNode.posZ)
                                         }
-                                        sharedBaseNode?.addChildNode(sphereNode)
+                                        targetParent.addChildNode(sphereNode)
                                     } else if (syncNode.type == "duck") {
                                         val currentModel = duckModel
                                         if (currentModel != null) {
@@ -304,13 +370,17 @@ fun ArActiveScreen(
                                                     scale = io.github.sceneview.math.Scale(0.5f)
                                                     position = Position(syncNode.posX, syncNode.posY, syncNode.posZ)
                                                 }
-                                                sharedBaseNode?.addChildNode(modelNode)
+                                                targetParent.addChildNode(modelNode)
                                             }
                                         }
                                     }
                                 },
                                 onRoomCleared = {
-                                    sharedBaseNode?.clearChildNodes()
+                                    if (board != null) {
+                                        board.clearChildNodes()
+                                    } else {
+                                        resolvedNode.clearChildNodes()
+                                    }
                                 },
                                 onConnectionStateChanged = { connected ->
                                     connectionState = connected
@@ -327,7 +397,150 @@ fun ArActiveScreen(
             },
             onGestureListener = rememberOnGestureListener(
                 onSingleTapConfirmed = { motionEvent, tappedNode ->
-                    if (appMode == ArAppMode.HOST_ACTIVE && sharedBaseNode == null) {
+                    if (isWhiteboardMode && whiteboardNode == null) {
+                        // Place Whiteboard
+                        val currentFrame = frame
+                        if (currentFrame != null) {
+                            val hitResult = currentFrame
+                                .hitTest(motionEvent.x, motionEvent.y)
+                                .firstOrNull { hit ->
+                                    val trackable = hit.trackable
+                                    (trackable is Plane && trackable.trackingState == TrackingState.TRACKING) ||
+                                    hit.isValid(depthPoint = true, point = true, instantPlacementPoint = true)
+                                }
+
+                            hitResult?.createAnchorOrNull()?.let { anchor ->
+                                val board = CubeNode(
+                                    engine = engine,
+                                    materialInstance = materialLoader.createColorInstance(Color(0xFFF5F5F5))
+                                ).apply {
+                                    scale = io.github.sceneview.math.Scale(whiteboardWidth, whiteboardHeight, 0.02f)
+                                    lookAt(cameraNode.worldPosition)
+                                    val rot = rotation
+                                    rotation = io.github.sceneview.math.Rotation(0f, rot.y, 0f)
+                                }
+                                whiteboardNode = board
+
+                                if (appMode == ArAppMode.SOLO) {
+                                    val anchorNode = AnchorNode(engine = engine, anchor = anchor)
+                                    whiteboardAnchorNode = anchorNode
+                                    anchorNode.addChildNode(board)
+                                    childNodes += anchorNode
+                                } else if (appMode == ArAppMode.HOST_ACTIVE) {
+                                    val cloudAnchor = CloudAnchorNode(engine = engine, anchor = anchor)
+                                    whiteboardAnchorNode = cloudAnchor
+                                    cloudAnchor.addChildNode(board)
+                                    childNodes += cloudAnchor
+                                    
+                                    val session = arSession
+                                    if (session != null) {
+                                        syncStatusText = "Hosting Shared Anchor with Whiteboard..."
+                                        cloudAnchor.host(session) { anchorId, state ->
+                                            if (state == Anchor.CloudAnchorState.SUCCESS && anchorId != null) {
+                                                activeRoomId = anchorId
+                                                sharedBaseNode = cloudAnchor
+                                                syncStatusText = null
+
+                                                // Initialize host socket client
+                                                val uri = URI("ws://$serverIp:8080")
+                                                val client = ArSyncClient(
+                                                    serverUri = uri,
+                                                    roomId = anchorId,
+                                                    onNodeReceived = { syncNode ->
+                                                        val nodeRadius = syncNode.scale
+                                                        val targetParent = board
+                                                        if (syncNode.type == "sphere") {
+                                                            val sphereNode = SphereNode(
+                                                                engine = engine,
+                                                                radius = nodeRadius,
+                                                                materialInstance = materialLoader.createColorInstance(sprayColor)
+                                                            ).apply {
+                                                                position = Position(syncNode.posX, syncNode.posY, syncNode.posZ)
+                                                            }
+                                                            targetParent.addChildNode(sphereNode)
+                                                        } else if (syncNode.type == "duck") {
+                                                            val currentModel = duckModel
+                                                            if (currentModel != null) {
+                                                                val modelInstance = modelLoader.createInstance(currentModel.modelInstance.asset)
+                                                                if (modelInstance != null) {
+                                                                    val modelNode = ModelNode(modelInstance = modelInstance).apply {
+                                                                        scale = io.github.sceneview.math.Scale(0.5f)
+                                                                        position = Position(syncNode.posX, syncNode.posY, syncNode.posZ)
+                                                                    }
+                                                                    targetParent.addChildNode(modelNode)
+                                                                }
+                                                            }
+                                                        }
+                                                    },
+                                                    onRoomCleared = {
+                                                        board.clearChildNodes()
+                                                    },
+                                                    onConnectionStateChanged = { connected ->
+                                                        connectionState = connected
+                                                    }
+                                                )
+                                                syncClient = client
+                                                client.connect()
+                                            } else {
+                                                syncStatusText = "Hosting failed: $state"
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    } else if (isWhiteboardMode && whiteboardNode != null && !isSprayMode) {
+                        // Place a duck on the whiteboard
+                        val currentModel = duckModel
+                        val board = whiteboardNode
+                        if (currentModel == null || board == null) {
+                            Toast.makeText(context, "Model not ready", Toast.LENGTH_SHORT).show()
+                        } else {
+                            val currentFrame = frame
+                            if (currentFrame != null) {
+                                val hitResult = currentFrame
+                                    .hitTest(motionEvent.x, motionEvent.y)
+                                    .firstOrNull { hit ->
+                                        val trackable = hit.trackable
+                                        (trackable is Plane && trackable.trackingState == TrackingState.TRACKING) ||
+                                        hit.isValid(depthPoint = true, point = true, instantPlacementPoint = true)
+                                    }
+
+                                hitResult?.createAnchorOrNull()?.let { anchor ->
+                                    val tempAnchorNode = AnchorNode(engine = engine, anchor = anchor)
+                                    val worldPos = tempAnchorNode.worldPosition
+                                    val localPos = (board.worldToLocal * dev.romainguy.kotlin.math.Float4(worldPos, 1f)).xyz
+                                    val halfWidth = whiteboardWidth / 2f
+                                    val halfHeight = whiteboardHeight / 2f
+
+                                    if (localPos.x >= -halfWidth && localPos.x <= halfWidth &&
+                                        localPos.y >= -halfHeight && localPos.y <= halfHeight) {
+
+                                        val modelInstance = modelLoader.createInstance(currentModel.modelInstance.asset)
+                                        if (modelInstance != null) {
+                                            val modelNode = ModelNode(modelInstance = modelInstance).apply {
+                                                scale = io.github.sceneview.math.Scale(0.5f)
+                                                position = Position(localPos.x, localPos.y, 0f)
+                                            }
+                                            board.addChildNode(modelNode)
+
+                                            if (appMode != ArAppMode.SOLO) {
+                                                val syncNode = ArSyncNode(
+                                                    type = "duck",
+                                                    posX = localPos.x,
+                                                    posY = localPos.y,
+                                                    posZ = 0f,
+                                                    scale = 0.5f,
+                                                    colorHex = ""
+                                                )
+                                                syncClient?.sendNode(syncNode)
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    } else if (appMode == ArAppMode.HOST_ACTIVE && sharedBaseNode == null) {
                         val currentFrame = frame
                         val session = arSession
                         if (currentFrame != null && session != null) {
@@ -343,13 +556,13 @@ fun ArActiveScreen(
                                 val cloudAnchor = CloudAnchorNode(engine, anchor)
                                 childNodes += cloudAnchor
                                 syncStatusText = "Hosting Shared Anchor..."
-                                
+
                                 cloudAnchor.host(session) { anchorId, state ->
                                     if (state == Anchor.CloudAnchorState.SUCCESS && anchorId != null) {
                                         activeRoomId = anchorId
                                         sharedBaseNode = cloudAnchor
                                         syncStatusText = null
-                                        
+
                                         // Initialize host socket client
                                         val uri = URI("ws://$serverIp:8080")
                                         val client = ArSyncClient(
@@ -561,11 +774,29 @@ fun ArActiveScreen(
                 onToggleMode = { isSprayMode = !isSprayMode },
                 onClearAll = {
                     if (appMode == ArAppMode.SOLO) {
-                        childNodes.clear()
+                        if (isWhiteboardMode) {
+                            whiteboardNode?.clearChildNodes()
+                        } else {
+                            childNodes.clear()
+                        }
                     } else {
                         syncClient?.sendClear()
                     }
-                }
+                },
+                isWhiteboardMode = isWhiteboardMode,
+                onToggleWhiteboardMode = {
+                    isWhiteboardMode = !isWhiteboardMode
+                    if (!isWhiteboardMode) {
+                        // Remove whiteboard from scene if disabled
+                        whiteboardAnchorNode?.let { childNodes -= it }
+                        whiteboardNode = null
+                        whiteboardAnchorNode = null
+                    }
+                },
+                whiteboardWidth = whiteboardWidth,
+                onWhiteboardWidthChange = { whiteboardWidth = it },
+                whiteboardHeight = whiteboardHeight,
+                onWhiteboardHeightChange = { whiteboardHeight = it }
             )
             
             Button(
@@ -617,5 +848,17 @@ fun ArActiveScreen(
                 }
             }
         }
+
+        // Version Indicator Overlay
+        Text(
+            text = "v1.2.0",
+            color = Color.White.copy(alpha = 0.5f),
+            fontSize = 11.sp,
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .padding(top = 16.dp, end = 16.dp)
+                .background(Color.Black.copy(alpha = 0.5f), RoundedCornerShape(4.dp))
+                .padding(horizontal = 6.dp, vertical = 2.dp)
+        )
     }
 }
