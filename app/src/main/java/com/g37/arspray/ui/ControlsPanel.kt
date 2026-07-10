@@ -15,6 +15,8 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
 import androidx.compose.foundation.horizontalScroll
@@ -50,6 +52,16 @@ fun ControlsPanel(
     onWhiteboardWidthChange: (Float) -> Unit,
     whiteboardHeight: Float,
     onWhiteboardHeightChange: (Float) -> Unit,
+    isWhiteboardTransparent: Boolean,
+    onWhiteboardTransparentToggle: (Boolean) -> Unit,
+    whiteboardYaw: Float,
+    onWhiteboardYawChange: (Float) -> Unit,
+    whiteboardPitch: Float,
+    onWhiteboardPitchChange: (Float) -> Unit,
+    whiteboardRoll: Float,
+    onWhiteboardRollChange: (Float) -> Unit,
+    whiteboardDistance: Float,
+    onWhiteboardDistanceChange: (Float) -> Unit,
     onAiRecognize: () -> Unit,
     selectedObjectType: ArObjectType,
     onObjectTypeChange: (ArObjectType) -> Unit,
@@ -101,6 +113,16 @@ fun ControlsPanel(
                     boardHeight = whiteboardHeight,
                     onWidthChange = onWhiteboardWidthChange,
                     onHeightChange = onWhiteboardHeightChange,
+                    isTransparent = isWhiteboardTransparent,
+                    onTransparentToggle = onWhiteboardTransparentToggle,
+                    yaw = whiteboardYaw,
+                    onYawChange = onWhiteboardYawChange,
+                    pitch = whiteboardPitch,
+                    onPitchChange = onWhiteboardPitchChange,
+                    roll = whiteboardRoll,
+                    onRollChange = onWhiteboardRollChange,
+                    distance = whiteboardDistance,
+                    onDistanceChange = onWhiteboardDistanceChange,
                     onAiRecognize = onAiRecognize
                 )
                 Spacer(modifier = Modifier.height(12.dp))
@@ -188,18 +210,28 @@ private fun WhiteboardSizeCard(
     boardHeight: Float,
     onWidthChange: (Float) -> Unit,
     onHeightChange: (Float) -> Unit,
+    isTransparent: Boolean,
+    onTransparentToggle: (Boolean) -> Unit,
+    yaw: Float,
+    onYawChange: (Float) -> Unit,
+    pitch: Float,
+    onPitchChange: (Float) -> Unit,
+    roll: Float,
+    onRollChange: (Float) -> Unit,
+    distance: Float,
+    onDistanceChange: (Float) -> Unit,
     onAiRecognize: () -> Unit
 ) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 24.dp)
-            .background(Color.Black.copy(alpha = 0.6f), RoundedCornerShape(12.dp))
+            .background(Color.Black.copy(alpha = 0.6f), RoundedCornerShape(16.dp))
             .padding(16.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Text(
-            text = "Whiteboard Dimensions",
+            text = "Whiteboard Configuration",
             color = Color.White,
             style = MaterialTheme.typography.titleSmall,
             modifier = Modifier.align(Alignment.Start)
@@ -211,55 +243,71 @@ private fun WhiteboardSizeCard(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text(
-                text = "Width: %.1f m".format(boardWidth),
+                text = "Transparent Background",
                 color = Color.White,
-                style = MaterialTheme.typography.bodyMedium,
-                modifier = Modifier.width(90.dp)
+                style = MaterialTheme.typography.bodyMedium
             )
-            Slider(
-                value = boardWidth,
-                onValueChange = onWidthChange,
-                valueRange = 0.5f..3.0f,
-                modifier = Modifier.weight(1f),
-                colors = SliderDefaults.colors(
-                    thumbColor = MaterialTheme.colorScheme.primary,
-                    activeTrackColor = MaterialTheme.colorScheme.primary
+            Switch(
+                checked = isTransparent,
+                onCheckedChange = onTransparentToggle,
+                colors = SwitchDefaults.colors(
+                    checkedThumbColor = MaterialTheme.colorScheme.primary,
+                    checkedTrackColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)
                 )
             )
         }
-        Spacer(modifier = Modifier.height(4.dp))
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(
-                text = "Height: %.1f m".format(boardHeight),
-                color = Color.White,
-                style = MaterialTheme.typography.bodyMedium,
-                modifier = Modifier.width(90.dp)
-            )
-            Slider(
-                value = boardHeight,
-                onValueChange = onHeightChange,
-                valueRange = 0.5f..2.5f,
-                modifier = Modifier.weight(1f),
-                colors = SliderDefaults.colors(
-                    thumbColor = MaterialTheme.colorScheme.primary,
-                    activeTrackColor = MaterialTheme.colorScheme.primary
-                )
-            )
+        Spacer(modifier = Modifier.height(8.dp))
+        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            SliderRow(label = "Width", value = boardWidth, valueRange = 0.5f..3.0f, suffix = "m", onValueChange = onWidthChange)
+            SliderRow(label = "Height", value = boardHeight, valueRange = 0.5f..3.0f, suffix = "m", onValueChange = onHeightChange)
+            SliderRow(label = "Pitch", value = pitch, valueRange = -90f..90f, suffix = "°", onValueChange = onPitchChange)
+            SliderRow(label = "Yaw", value = yaw, valueRange = -180f..180f, suffix = "°", onValueChange = onYawChange)
+            SliderRow(label = "Roll", value = roll, valueRange = -180f..180f, suffix = "°", onValueChange = onRollChange)
+            SliderRow(label = "Distance", value = distance, valueRange = -1.5f..1.5f, suffix = "m", onValueChange = onDistanceChange)
         }
         Spacer(modifier = Modifier.height(12.dp))
         Button(
             onClick = onAiRecognize,
             colors = ButtonDefaults.buttonColors(
-                containerColor = Color(0xFF6200EE)
+                containerColor = MaterialTheme.colorScheme.primary,
+                contentColor = Color.Black
             ),
             modifier = Modifier.fillMaxWidth()
         ) {
-            Text("AI AutoDraw (Sketch to 3D)", color = Color.White)
+            Text("AI AutoDraw (Sketch to 3D)")
         }
+    }
+}
+
+@Composable
+private fun SliderRow(
+    label: String,
+    value: Float,
+    valueRange: ClosedFloatingPointRange<Float>,
+    suffix: String,
+    onValueChange: (Float) -> Unit
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            text = "$label: %.1f$suffix".format(value),
+            color = Color.White,
+            style = MaterialTheme.typography.bodyMedium,
+            modifier = Modifier.width(100.dp)
+        )
+        Slider(
+            value = value,
+            onValueChange = onValueChange,
+            valueRange = valueRange,
+            modifier = Modifier.weight(1f),
+            colors = SliderDefaults.colors(
+                thumbColor = MaterialTheme.colorScheme.primary,
+                activeTrackColor = MaterialTheme.colorScheme.primary
+            )
+        )
     }
 }
 

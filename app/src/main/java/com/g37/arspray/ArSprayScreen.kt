@@ -177,6 +177,11 @@ fun ArActiveScreen(
     var whiteboardAnchorNode by remember { mutableStateOf<AnchorNode?>(null) }
     var whiteboardWidth by remember { mutableFloatStateOf(1.2f) }
     var whiteboardHeight by remember { mutableFloatStateOf(0.9f) }
+    var isWhiteboardTransparent by remember { mutableStateOf(false) }
+    var whiteboardYaw by remember { mutableFloatStateOf(0f) }
+    var whiteboardPitch by remember { mutableFloatStateOf(0f) }
+    var whiteboardRoll by remember { mutableFloatStateOf(0f) }
+    var whiteboardDistance by remember { mutableFloatStateOf(0f) }
 
     // --- Gesture tracking state (for stroke interpolation) ---
     var lastTouchX by remember { mutableStateOf<Float?>(null) }
@@ -190,9 +195,27 @@ fun ArActiveScreen(
     // --- Selected Object Mode Type ---
     var selectedObjectType by remember { mutableStateOf(ArObjectType.DUCK) }
 
-    // Automatically update whiteboard dimensions when parameters change
-    LaunchedEffect(whiteboardWidth, whiteboardHeight, whiteboardNode) {
-        whiteboardNode?.scale = io.github.sceneview.math.Scale(whiteboardWidth, whiteboardHeight, 0.02f)
+    // Automatically update whiteboard dimensions, transparency, rotation, and distance
+    LaunchedEffect(
+        whiteboardWidth,
+        whiteboardHeight,
+        isWhiteboardTransparent,
+        whiteboardYaw,
+        whiteboardPitch,
+        whiteboardRoll,
+        whiteboardDistance,
+        whiteboardNode
+    ) {
+        val board = whiteboardNode ?: return@LaunchedEffect
+        board.scale = io.github.sceneview.math.Scale(whiteboardWidth, whiteboardHeight, 0.02f)
+        try {
+            val targetColor = if (isWhiteboardTransparent) Color.Transparent else Color(0xFFF5F5F5)
+            board.materialInstance = materialLoader.createColorInstance(targetColor)
+        } catch (e: Exception) {
+            // Fallback for material creation
+        }
+        board.rotation = io.github.sceneview.math.Rotation(whiteboardPitch, whiteboardYaw, whiteboardRoll)
+        board.position = Position(0f, 0f, whiteboardDistance)
     }
 
     // --- Shared Anchor & Sync State ---
@@ -405,15 +428,20 @@ fun ArActiveScreen(
                             val board = if (isWhiteboardMode) {
                                 CubeNode(
                                     engine = engine,
-                                    materialInstance = materialLoader.createColorInstance(Color(0xFFF5F5F5))
+                                    materialInstance = materialLoader.createColorInstance(
+                                        if (isWhiteboardTransparent) Color.Transparent else Color(0xFFF5F5F5)
+                                    )
                                 ).apply {
                                     scale = io.github.sceneview.math.Scale(whiteboardWidth, whiteboardHeight, 0.02f)
                                     lookAt(cameraNode.worldPosition)
                                     val rot = rotation
-                                    rotation = io.github.sceneview.math.Rotation(0f, rot.y, 0f)
+                                    whiteboardYaw = rot.y
+                                    whiteboardPitch = rot.x
+                                    whiteboardRoll = rot.z
+                                    position = Position(0f, 0f, whiteboardDistance)
                                 }
                             } else null
-
+                            
                             if (board != null) {
                                 whiteboardNode = board
                                 resolvedNode.addChildNode(board)
@@ -1120,6 +1148,8 @@ fun ArActiveScreen(
 
             StatusOverlay(
                 isSprayMode = isSprayMode,
+                selectedObjectType = selectedObjectType,
+                isWhiteboardMode = isWhiteboardMode,
                 modifier = Modifier
             )
         }
@@ -1218,6 +1248,16 @@ fun ArActiveScreen(
                 onWhiteboardWidthChange = { whiteboardWidth = it },
                 whiteboardHeight = whiteboardHeight,
                 onWhiteboardHeightChange = { whiteboardHeight = it },
+                isWhiteboardTransparent = isWhiteboardTransparent,
+                onWhiteboardTransparentToggle = { isWhiteboardTransparent = it },
+                whiteboardYaw = whiteboardYaw,
+                onWhiteboardYawChange = { whiteboardYaw = it },
+                whiteboardPitch = whiteboardPitch,
+                onWhiteboardPitchChange = { whiteboardPitch = it },
+                whiteboardRoll = whiteboardRoll,
+                onWhiteboardRollChange = { whiteboardRoll = it },
+                whiteboardDistance = whiteboardDistance,
+                onWhiteboardDistanceChange = { whiteboardDistance = it },
                 onAiRecognize = onAiRecognize,
                 selectedObjectType = selectedObjectType,
                 onObjectTypeChange = { selectedObjectType = it }
