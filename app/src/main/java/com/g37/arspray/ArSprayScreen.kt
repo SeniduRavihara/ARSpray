@@ -69,19 +69,17 @@ import io.github.sceneview.math.Position
 import io.github.sceneview.node.ModelNode
 import io.github.sceneview.node.SphereNode
 import io.github.sceneview.node.CubeNode
+import io.github.sceneview.node.LightNode
+import com.google.android.filament.LightManager
 import io.github.sceneview.rememberEngine
+import io.github.sceneview.rememberMainLightNode
 import io.github.sceneview.rememberMaterialLoader
 import io.github.sceneview.rememberModelLoader
 import io.github.sceneview.rememberNodes
 import io.github.sceneview.rememberOnGestureListener
 import java.net.URI
-import com.google.mlkit.vision.digitalink.recognition.DigitalInkRecognition
-import com.google.mlkit.vision.digitalink.recognition.DigitalInkRecognitionModel
-import com.google.mlkit.vision.digitalink.recognition.DigitalInkRecognitionModelIdentifier
-import com.google.mlkit.vision.digitalink.recognition.DigitalInkRecognizerOptions
 import com.google.mlkit.vision.digitalink.recognition.Ink
-import com.google.mlkit.common.model.RemoteModelManager
-import com.google.mlkit.common.model.DownloadConditions
+import com.g37.arspray.ai.AutoDrawClassifier
 
 enum class ArAppMode {
     LOBBY,
@@ -164,6 +162,9 @@ fun ArActiveScreen(
     var arSession by remember { mutableStateOf<Session?>(null) }
     var isModelLoading by remember { mutableStateOf(true) }
     var duckModel by remember { mutableStateOf<ModelNode?>(null) }
+    var avocadoModel by remember { mutableStateOf<ModelNode?>(null) }
+    var foxModel by remember { mutableStateOf<ModelNode?>(null) }
+    var lanternModel by remember { mutableStateOf<ModelNode?>(null) }
 
     // --- Drawing state ---
     var isSprayMode by remember { mutableStateOf(true) }
@@ -185,6 +186,9 @@ fun ArActiveScreen(
     // --- ML Kit Ink and Recognizer state ---
     var inkBuilder by remember { mutableStateOf(Ink.builder()) }
     var currentStrokeBuilder by remember { mutableStateOf<Ink.Stroke.Builder?>(null) }
+
+    // --- Selected Object Mode Type ---
+    var selectedObjectType by remember { mutableStateOf(ArObjectType.DUCK) }
 
     // Automatically update whiteboard dimensions when parameters change
     LaunchedEffect(whiteboardWidth, whiteboardHeight, whiteboardNode) {
@@ -311,7 +315,22 @@ fun ArActiveScreen(
         }
     }
 
-    // Load the duck GLB model asynchronously
+    // Add headlight to camera so that objects are always illuminated from the camera view direction
+    LaunchedEffect(cameraNode) {
+        try {
+            val headlight = LightNode(
+                engine = engine,
+                type = LightManager.Type.DIRECTIONAL
+            ) {
+                intensity(150_000.0f)
+            }
+            cameraNode.addChildNode(headlight)
+        } catch (e: Exception) {
+            Toast.makeText(context, "Error setting up headlight: ${e.message}", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    // Load the GLB models asynchronously
     LaunchedEffect(modelLoader) {
         isModelLoading = true
         try {
@@ -320,6 +339,27 @@ fun ArActiveScreen(
                 ModelNode(modelInstance = modelLoader.createInstance(model)!!)
             } else {
                 Toast.makeText(context, "Model not found in assets/models/duck.glb", Toast.LENGTH_LONG).show()
+                null
+            }
+            val aModel = modelLoader.loadModel("models/avocado.glb")
+            avocadoModel = if (aModel != null) {
+                ModelNode(modelInstance = modelLoader.createInstance(aModel)!!)
+            } else {
+                Toast.makeText(context, "Model not found in assets/models/avocado.glb", Toast.LENGTH_LONG).show()
+                null
+            }
+            val fModel = modelLoader.loadModel("models/fox.glb")
+            foxModel = if (fModel != null) {
+                ModelNode(modelInstance = modelLoader.createInstance(fModel)!!)
+            } else {
+                Toast.makeText(context, "Model not found in assets/models/fox.glb", Toast.LENGTH_LONG).show()
+                null
+            }
+            val lModel = modelLoader.loadModel("models/lantern.glb")
+            lanternModel = if (lModel != null) {
+                ModelNode(modelInstance = modelLoader.createInstance(lModel)!!)
+            } else {
+                Toast.makeText(context, "Model not found in assets/models/lantern.glb", Toast.LENGTH_LONG).show()
                 null
             }
         } catch (e: Exception) {
@@ -338,6 +378,9 @@ fun ArActiveScreen(
             cameraNode = cameraNode,
             childNodes = childNodes,
             planeRenderer = true,
+            mainLightNode = rememberMainLightNode(engine) {
+                intensity = 100_000.0f
+            },
             onViewCreated = {
                 planeRenderer.planeRendererMode = PlaneRenderer.PlaneRendererMode.RENDER_ALL
             },
@@ -405,6 +448,60 @@ fun ArActiveScreen(
                                                 targetParent.addChildNode(modelNode)
                                             }
                                         }
+                                    } else if (syncNode.type == "avocado") {
+                                        val currentModel = avocadoModel
+                                        if (currentModel != null) {
+                                            val modelInstance = modelLoader.createInstance(currentModel.modelInstance.asset)
+                                            if (modelInstance != null) {
+                                                val modelNode = ModelNode(modelInstance = modelInstance).apply {
+                                                    scale = io.github.sceneview.math.Scale(3.0f)
+                                                    position = Position(syncNode.posX, syncNode.posY, syncNode.posZ)
+                                                }
+                                                targetParent.addChildNode(modelNode)
+                                            }
+                                        }
+                                    } else if (syncNode.type == "fox") {
+                                        val currentModel = foxModel
+                                        if (currentModel != null) {
+                                            val modelInstance = modelLoader.createInstance(currentModel.modelInstance.asset)
+                                            if (modelInstance != null) {
+                                                val modelNode = ModelNode(modelInstance = modelInstance).apply {
+                                                    scale = io.github.sceneview.math.Scale(0.02f)
+                                                    position = Position(syncNode.posX, syncNode.posY, syncNode.posZ)
+                                                }
+                                                targetParent.addChildNode(modelNode)
+                                            }
+                                        }
+                                    } else if (syncNode.type == "lantern") {
+                                        val currentModel = lanternModel
+                                        if (currentModel != null) {
+                                            val modelInstance = modelLoader.createInstance(currentModel.modelInstance.asset)
+                                            if (modelInstance != null) {
+                                                val modelNode = ModelNode(modelInstance = modelInstance).apply {
+                                                    scale = io.github.sceneview.math.Scale(0.5f)
+                                                    position = Position(syncNode.posX, syncNode.posY, syncNode.posZ)
+                                                }
+                                                targetParent.addChildNode(modelNode)
+                                            }
+                                        }
+                                    } else if (syncNode.type == "cube") {
+                                        val cubeNode = CubeNode(
+                                            engine = engine,
+                                            size = io.github.sceneview.math.Size(0.1f),
+                                            materialInstance = materialLoader.createColorInstance(Color.Red)
+                                        ).apply {
+                                            position = Position(syncNode.posX, syncNode.posY, syncNode.posZ)
+                                        }
+                                        targetParent.addChildNode(cubeNode)
+                                    } else if (syncNode.type == "sphere_object") {
+                                        val sphereNode = SphereNode(
+                                            engine = engine,
+                                            radius = 0.05f,
+                                            materialInstance = materialLoader.createColorInstance(Color.Blue)
+                                        ).apply {
+                                            position = Position(syncNode.posX, syncNode.posY, syncNode.posZ)
+                                        }
+                                        targetParent.addChildNode(sphereNode)
                                     }
                                 },
                                 onRoomCleared = {
@@ -515,6 +612,60 @@ fun ArActiveScreen(
                                                                     targetParent.addChildNode(modelNode)
                                                                 }
                                                             }
+                                                        } else if (syncNode.type == "avocado") {
+                                                            val currentModel = avocadoModel
+                                                            if (currentModel != null) {
+                                                                val modelInstance = modelLoader.createInstance(currentModel.modelInstance.asset)
+                                                                if (modelInstance != null) {
+                                                                    val modelNode = ModelNode(modelInstance = modelInstance).apply {
+                                                                        scale = io.github.sceneview.math.Scale(3.0f)
+                                                                        position = Position(syncNode.posX, syncNode.posY, syncNode.posZ)
+                                                                    }
+                                                                    targetParent.addChildNode(modelNode)
+                                                                }
+                                                            }
+                                                        } else if (syncNode.type == "fox") {
+                                                            val currentModel = foxModel
+                                                            if (currentModel != null) {
+                                                                val modelInstance = modelLoader.createInstance(currentModel.modelInstance.asset)
+                                                                if (modelInstance != null) {
+                                                                    val modelNode = ModelNode(modelInstance = modelInstance).apply {
+                                                                        scale = io.github.sceneview.math.Scale(0.02f)
+                                                                        position = Position(syncNode.posX, syncNode.posY, syncNode.posZ)
+                                                                    }
+                                                                    targetParent.addChildNode(modelNode)
+                                                                }
+                                                            }
+                                                        } else if (syncNode.type == "lantern") {
+                                                            val currentModel = lanternModel
+                                                            if (currentModel != null) {
+                                                                val modelInstance = modelLoader.createInstance(currentModel.modelInstance.asset)
+                                                                if (modelInstance != null) {
+                                                                    val modelNode = ModelNode(modelInstance = modelInstance).apply {
+                                                                        scale = io.github.sceneview.math.Scale(0.5f)
+                                                                        position = Position(syncNode.posX, syncNode.posY, syncNode.posZ)
+                                                                    }
+                                                                    targetParent.addChildNode(modelNode)
+                                                                }
+                                                            }
+                                                        } else if (syncNode.type == "cube") {
+                                                            val cubeNode = CubeNode(
+                                                                engine = engine,
+                                                                size = io.github.sceneview.math.Size(0.1f),
+                                                                materialInstance = materialLoader.createColorInstance(Color.Red)
+                                                            ).apply {
+                                                                position = Position(syncNode.posX, syncNode.posY, syncNode.posZ)
+                                                            }
+                                                            targetParent.addChildNode(cubeNode)
+                                                        } else if (syncNode.type == "sphere_object") {
+                                                            val sphereNode = SphereNode(
+                                                                engine = engine,
+                                                                radius = 0.05f,
+                                                                materialInstance = materialLoader.createColorInstance(Color.Blue)
+                                                            ).apply {
+                                                                position = Position(syncNode.posX, syncNode.posY, syncNode.posZ)
+                                                            }
+                                                            targetParent.addChildNode(sphereNode)
                                                         }
                                                     },
                                                     onRoomCleared = {
@@ -537,10 +688,9 @@ fun ArActiveScreen(
                             }
                         }
                     } else if (isWhiteboardMode && whiteboardNode != null && !isSprayMode) {
-                        // Place a duck on the whiteboard
-                        val currentModel = duckModel
+                        // Place a object on the whiteboard
                         val board = whiteboardNode
-                        if (currentModel == null || board == null) {
+                        if (board == null) {
                             Toast.makeText(context, "Model not ready", Toast.LENGTH_SHORT).show()
                         } else {
                             val currentFrame = frame
@@ -574,17 +724,80 @@ fun ArActiveScreen(
                                     if (localPos.x >= -halfWidth && localPos.x <= halfWidth &&
                                         localPos.y >= -halfHeight && localPos.y <= halfHeight) {
 
-                                        val modelInstance = modelLoader.createInstance(currentModel.modelInstance.asset)
-                                        if (modelInstance != null) {
-                                            val modelNode = ModelNode(modelInstance = modelInstance).apply {
-                                                scale = io.github.sceneview.math.Scale(0.5f)
-                                                position = Position(localPos.x, localPos.y, 0f)
+                                        val spawnedNode = when (selectedObjectType) {
+                                            ArObjectType.DUCK -> {
+                                                val currentModel = duckModel
+                                                val modelInstance = currentModel?.let { modelLoader.createInstance(it.modelInstance.asset) }
+                                                if (modelInstance != null) {
+                                                    ModelNode(modelInstance = modelInstance).apply {
+                                                        scale = io.github.sceneview.math.Scale(0.5f)
+                                                        position = Position(localPos.x, localPos.y, 0f)
+                                                    }
+                                                } else null
                                             }
-                                            board.addChildNode(modelNode)
+                                            ArObjectType.AVOCADO -> {
+                                                val currentModel = avocadoModel
+                                                val modelInstance = currentModel?.let { modelLoader.createInstance(it.modelInstance.asset) }
+                                                if (modelInstance != null) {
+                                                    ModelNode(modelInstance = modelInstance).apply {
+                                                        scale = io.github.sceneview.math.Scale(3.0f)
+                                                        position = Position(localPos.x, localPos.y, 0f)
+                                                    }
+                                                } else null
+                                            }
+                                            ArObjectType.FOX -> {
+                                                val currentModel = foxModel
+                                                val modelInstance = currentModel?.let { modelLoader.createInstance(it.modelInstance.asset) }
+                                                if (modelInstance != null) {
+                                                    ModelNode(modelInstance = modelInstance).apply {
+                                                        scale = io.github.sceneview.math.Scale(0.02f)
+                                                        position = Position(localPos.x, localPos.y, 0f)
+                                                    }
+                                                } else null
+                                            }
+                                            ArObjectType.LANTERN -> {
+                                                val currentModel = lanternModel
+                                                val modelInstance = currentModel?.let { modelLoader.createInstance(it.modelInstance.asset) }
+                                                if (modelInstance != null) {
+                                                    ModelNode(modelInstance = modelInstance).apply {
+                                                        scale = io.github.sceneview.math.Scale(0.5f)
+                                                        position = Position(localPos.x, localPos.y, 0f)
+                                                    }
+                                                } else null
+                                            }
+                                            ArObjectType.CUBE -> {
+                                                CubeNode(
+                                                    engine = engine,
+                                                    size = io.github.sceneview.math.Size(0.1f),
+                                                    materialInstance = materialLoader.createColorInstance(Color.Red)
+                                                ).apply {
+                                                    position = Position(localPos.x, localPos.y, 0f)
+                                                }
+                                            }
+                                            ArObjectType.SPHERE -> {
+                                                SphereNode(
+                                                    engine = engine,
+                                                    radius = 0.05f,
+                                                    materialInstance = materialLoader.createColorInstance(Color.Blue)
+                                                ).apply {
+                                                    position = Position(localPos.x, localPos.y, 0f)
+                                                }
+                                            }
+                                        }
+
+                                        if (spawnedNode != null) {
+                                            board.addChildNode(spawnedNode)
 
                                             if (appMode != ArAppMode.SOLO) {
                                                 val syncNode = ArSyncNode(
-                                                    type = "duck",
+                                                    type = when (selectedObjectType) {
+                                                        ArObjectType.DUCK -> "duck"
+                                                        ArObjectType.AVOCADO -> "avocado"
+                                                        ArObjectType.FOX -> "fox"
+                                                        ArObjectType.LANTERN -> "lantern"
+                                                        ArObjectType.CUBE -> "cube"
+                                                        ArObjectType.SPHERE -> "sphere_object"
+                                                    },
                                                     posX = localPos.x,
                                                     posY = localPos.y,
                                                     posZ = 0f,
@@ -649,6 +862,36 @@ fun ArActiveScreen(
                                                             sharedBaseNode?.addChildNode(modelNode)
                                                         }
                                                     }
+                                                } else if (syncNode.type == "avocado") {
+                                                    val currentModel = avocadoModel
+                                                    if (currentModel != null) {
+                                                        val modelInstance = modelLoader.createInstance(currentModel.modelInstance.asset)
+                                                        if (modelInstance != null) {
+                                                            val modelNode = ModelNode(modelInstance = modelInstance).apply {
+                                                                scale = io.github.sceneview.math.Scale(3.0f)
+                                                                position = Position(syncNode.posX, syncNode.posY, syncNode.posZ)
+                                                            }
+                                                            sharedBaseNode?.addChildNode(modelNode)
+                                                        }
+                                                    }
+                                                } else if (syncNode.type == "cube") {
+                                                    val cubeNode = CubeNode(
+                                                        engine = engine,
+                                                        size = io.github.sceneview.math.Size(0.1f),
+                                                        materialInstance = materialLoader.createColorInstance(Color.Red)
+                                                    ).apply {
+                                                        position = Position(syncNode.posX, syncNode.posY, syncNode.posZ)
+                                                    }
+                                                    sharedBaseNode?.addChildNode(cubeNode)
+                                                } else if (syncNode.type == "sphere_object") {
+                                                    val sphereNode = SphereNode(
+                                                        engine = engine,
+                                                        radius = 0.05f,
+                                                        materialInstance = materialLoader.createColorInstance(Color.Blue)
+                                                    ).apply {
+                                                        position = Position(syncNode.posX, syncNode.posY, syncNode.posZ)
+                                                    }
+                                                    sharedBaseNode?.addChildNode(sphereNode)
                                                 }
                                             },
                                             onRoomCleared = {
@@ -667,63 +910,110 @@ fun ArActiveScreen(
                             }
                         }
                     } else {
-                        // Regular duck placement mode
+                        // Regular object placement mode
                         if (!isSprayMode) {
-                            val currentModel = duckModel
-                            if (currentModel == null) {
-                                Toast.makeText(context, "Model not ready", Toast.LENGTH_SHORT).show()
-                            } else {
-                                val currentFrame = frame
-                                val session = arSession
-                                if (currentFrame != null) {
-                                    var hitResult = currentFrame
-                                        .hitTest(motionEvent.x, motionEvent.y)
-                                        .firstOrNull { hit ->
-                                            val trackable = hit.trackable
-                                            (trackable is Plane && trackable.trackingState == TrackingState.TRACKING) ||
-                                            hit.isValid(depthPoint = true, point = true, instantPlacementPoint = true)
+                            val currentFrame = frame
+                            if (currentFrame != null) {
+                                // Strictly require tracked planes in Object Mode
+                                val hitResult = currentFrame
+                                    .hitTest(motionEvent.x, motionEvent.y)
+                                    .firstOrNull { hit ->
+                                        val trackable = hit.trackable
+                                        trackable is Plane && trackable.trackingState == TrackingState.TRACKING
+                                    }
+
+                                hitResult?.createAnchorOrNull()?.let { anchor ->
+                                    val targetNode = when (selectedObjectType) {
+                                        ArObjectType.DUCK -> {
+                                            val currentModel = duckModel
+                                            if (currentModel != null) {
+                                                val modelInstance = modelLoader.createInstance(currentModel.modelInstance.asset)
+                                                if (modelInstance != null) {
+                                                    ModelNode(modelInstance = modelInstance).apply {
+                                                        scale = io.github.sceneview.math.Scale(0.5f)
+                                                    }
+                                                } else null
+                                            } else null
                                         }
-                                    if (hitResult == null) {
-                                        hitResult = currentFrame.hitTest(motionEvent.x, motionEvent.y).firstOrNull()
+                                        ArObjectType.AVOCADO -> {
+                                            val currentModel = avocadoModel
+                                            if (currentModel != null) {
+                                                val modelInstance = modelLoader.createInstance(currentModel.modelInstance.asset)
+                                                if (modelInstance != null) {
+                                                    ModelNode(modelInstance = modelInstance).apply {
+                                                        scale = io.github.sceneview.math.Scale(3.0f)
+                                                    }
+                                                } else null
+                                            } else null
+                                        }
+                                        ArObjectType.FOX -> {
+                                            val currentModel = foxModel
+                                            if (currentModel != null) {
+                                                val modelInstance = modelLoader.createInstance(currentModel.modelInstance.asset)
+                                                if (modelInstance != null) {
+                                                    ModelNode(modelInstance = modelInstance).apply {
+                                                        scale = io.github.sceneview.math.Scale(0.02f)
+                                                    }
+                                                } else null
+                                            } else null
+                                        }
+                                        ArObjectType.LANTERN -> {
+                                            val currentModel = lanternModel
+                                            if (currentModel != null) {
+                                                val modelInstance = modelLoader.createInstance(currentModel.modelInstance.asset)
+                                                if (modelInstance != null) {
+                                                    ModelNode(modelInstance = modelInstance).apply {
+                                                        scale = io.github.sceneview.math.Scale(0.5f)
+                                                    }
+                                                } else null
+                                            } else null
+                                        }
+                                        ArObjectType.CUBE -> {
+                                            CubeNode(
+                                                engine = engine,
+                                                size = io.github.sceneview.math.Size(0.1f),
+                                                materialInstance = materialLoader.createColorInstance(Color.Red)
+                                            )
+                                        }
+                                        ArObjectType.SPHERE -> {
+                                            SphereNode(
+                                                engine = engine,
+                                                radius = 0.05f,
+                                                materialInstance = materialLoader.createColorInstance(Color.Blue)
+                                            )
+                                        }
                                     }
 
-                                    var anchor = hitResult?.createAnchorOrNull()
-                                    if (anchor == null && session != null) {
-                                        val cameraPose = currentFrame.camera.displayOrientedPose
-                                        val fallbackPose = cameraPose.compose(com.google.ar.core.Pose.makeTranslation(0f, 0f, -1.0f))
-                                        anchor = session.createAnchor(fallbackPose)
-                                    }
+                                    if (targetNode != null) {
+                                        if (appMode == ArAppMode.SOLO) {
+                                            val anchorNode = AnchorNode(engine = engine, anchor = anchor)
+                                            anchorNode.addChildNode(targetNode)
+                                            childNodes += anchorNode
+                                        } else {
+                                            val baseNode = sharedBaseNode
+                                            if (baseNode != null) {
+                                                val tempAnchorNode = AnchorNode(engine = engine, anchor = anchor)
+                                                targetNode.worldPosition = tempAnchorNode.worldPosition
+                                                baseNode.addChildNode(targetNode)
 
-                                    anchor?.let { anchor ->
-                                        val modelInstance = modelLoader.createInstance(currentModel.modelInstance.asset)
-                                        if (modelInstance != null) {
-                                            val modelNode = ModelNode(modelInstance = modelInstance).apply {
-                                                scale = io.github.sceneview.math.Scale(0.5f)
-                                            }
-
-                                            if (appMode == ArAppMode.SOLO) {
-                                                val anchorNode = AnchorNode(engine = engine, anchor = anchor)
-                                                anchorNode.addChildNode(modelNode)
-                                                childNodes += anchorNode
-                                            } else {
-                                                val baseNode = sharedBaseNode
-                                                if (baseNode != null) {
-                                                    val tempAnchorNode = AnchorNode(engine = engine, anchor = anchor)
-                                                    modelNode.worldPosition = tempAnchorNode.worldPosition
-                                                    baseNode.addChildNode(modelNode)
-
-                                                    // Send placements over socket
-                                                    val relativePos = modelNode.position
-                                                    val syncNode = ArSyncNode(
-                                                        type = "duck",
-                                                        posX = relativePos.x,
-                                                        posY = relativePos.y,
-                                                        posZ = relativePos.z,
-                                                        scale = 0.5f,
-                                                        colorHex = ""
-                                                    )
-                                                    syncClient?.sendNode(syncNode)
-                                                }
+                                                // Send placements over socket
+                                                val relativePos = targetNode.position
+                                                val syncNode = ArSyncNode(
+                                                    type = when (selectedObjectType) {
+                                                        ArObjectType.DUCK -> "duck"
+                                                        ArObjectType.AVOCADO -> "avocado"
+                                                        ArObjectType.FOX -> "fox"
+                                                        ArObjectType.LANTERN -> "lantern"
+                                                        ArObjectType.CUBE -> "cube"
+                                                        ArObjectType.SPHERE -> "sphere_object"
+                                                    },
+                                                    posX = relativePos.x,
+                                                    posY = relativePos.y,
+                                                    posZ = relativePos.z,
+                                                    scale = 0.5f,
+                                                    colorHex = ""
+                                                )
+                                                syncClient?.sendNode(syncNode)
                                             }
                                         }
                                     }
@@ -848,171 +1138,45 @@ fun ArActiveScreen(
             }
 
             val ink = inkBuilder.build()
-            if (ink.strokes.isEmpty()) {
-                Toast.makeText(context, "Please draw something on the whiteboard first!", Toast.LENGTH_SHORT).show()
-            } else {
-                val modelIdentifier = DigitalInkRecognitionModelIdentifier.fromLanguageTag("zxx-Zsym-x-autodraw")
-                if (modelIdentifier == null) {
-                    Toast.makeText(context, "AutoDraw model identifier not found", Toast.LENGTH_SHORT).show()
-                } else {
-                    val model = DigitalInkRecognitionModel.builder(modelIdentifier).build()
-                    val modelManager = RemoteModelManager.getInstance()
+            val classifier = AutoDrawClassifier(
+                context = context,
+                onStateChanged = { syncStatusText = it },
+                onClearDrawing = {
+                    if (appMode == ArAppMode.SOLO) {
+                        whiteboardNode?.clearChildNodes()
+                    } else {
+                        syncClient?.sendClear()
+                    }
+                    inkBuilder = Ink.builder()
+                },
+                onSuccess = { centerX, centerY ->
+                    val currentModel = duckModel
+                    val board = whiteboardNode
+                    if (currentModel != null && board != null) {
+                        val modelInstance = modelLoader.createInstance(currentModel.modelInstance.asset)
+                        if (modelInstance != null) {
+                            val modelNode = ModelNode(modelInstance = modelInstance).apply {
+                                scale = io.github.sceneview.math.Scale(0.5f)
+                                position = Position(centerX, centerY, 0f)
+                            }
+                            board.addChildNode(modelNode)
 
-                    syncStatusText = "Checking AI Sketch Model..."
-                    modelManager.isModelDownloaded(model)
-                        .addOnSuccessListener { downloaded ->
-                            if (downloaded) {
-                                syncStatusText = "AI is analyzing your sketch..."
-                                val recognizer = DigitalInkRecognition.getClient(
-                                    DigitalInkRecognizerOptions.builder(model).build()
+                            if (appMode != ArAppMode.SOLO) {
+                                val syncNode = ArSyncNode(
+                                    type = "duck",
+                                    posX = centerX,
+                                    posY = centerY,
+                                    posZ = 0f,
+                                    scale = 0.5f,
+                                    colorHex = ""
                                 )
-                                recognizer.recognize(ink)
-                                    .addOnSuccessListener { result ->
-                                        syncStatusText = null
-                                        val candidate = result.candidates.firstOrNull()?.text?.lowercase() ?: ""
-                                        if (candidate == "duck") {
-                                            Toast.makeText(context, "AI recognized a Duck! Spawning 3D model...", Toast.LENGTH_LONG).show()
-                                            
-                                            if (appMode == ArAppMode.SOLO) {
-                                                whiteboardNode?.clearChildNodes()
-                                            } else {
-                                                syncClient?.sendClear()
-                                            }
-                                            inkBuilder = Ink.builder()
-
-                                            var minX = Float.MAX_VALUE
-                                            var maxX = -Float.MAX_VALUE
-                                            var minY = Float.MAX_VALUE
-                                            var maxY = -Float.MAX_VALUE
-                                            for (stroke in ink.strokes) {
-                                                for (pt in stroke.pointsInGlobalCoordinates) {
-                                                    val xMeters = pt.x / 1000f
-                                                    val yMeters = pt.y / 1000f
-                                                    if (xMeters < minX) minX = xMeters
-                                                    if (xMeters > maxX) maxX = xMeters
-                                                    if (yMeters < minY) minY = yMeters
-                                                    if (yMeters > maxY) maxY = yMeters
-                                                }
-                                            }
-                                            val centerX = if (minX != Float.MAX_VALUE) (minX + maxX) / 2f else 0f
-                                            val centerY = if (minY != Float.MAX_VALUE) (minY + maxY) / 2f else 0f
-
-                                            val currentModel = duckModel
-                                            val board = whiteboardNode
-                                            if (currentModel != null && board != null) {
-                                                val modelInstance = modelLoader.createInstance(currentModel.modelInstance.asset)
-                                                if (modelInstance != null) {
-                                                    val modelNode = ModelNode(modelInstance = modelInstance).apply {
-                                                        scale = io.github.sceneview.math.Scale(0.5f)
-                                                        position = Position(centerX, centerY, 0f)
-                                                    }
-                                                    board.addChildNode(modelNode)
-
-                                                    if (appMode != ArAppMode.SOLO) {
-                                                        val syncNode = ArSyncNode(
-                                                            type = "duck",
-                                                            posX = centerX,
-                                                            posY = centerY,
-                                                            posZ = 0f,
-                                                            scale = 0.5f,
-                                                            colorHex = ""
-                                                        )
-                                                        syncClient?.sendNode(syncNode)
-                                                    }
-                                                }
-                                            }
-                                        } else {
-                                            Toast.makeText(context, "AI recognized '$candidate', but only 'duck' is supported for 3D placement.", Toast.LENGTH_LONG).show()
-                                        }
-                                    }
-                                    .addOnFailureListener { e ->
-                                        syncStatusText = null
-                                        Toast.makeText(context, "Recognition failed: ${e.message}", Toast.LENGTH_SHORT).show()
-                                    }
-                            } else {
-                                syncStatusText = "Downloading AI Model (2MB)..."
-                                modelManager.download(model, DownloadConditions.Builder().build())
-                                    .addOnSuccessListener {
-                                        syncStatusText = "AI Model downloaded! Analyzing..."
-                                        val recognizer = DigitalInkRecognition.getClient(
-                                            DigitalInkRecognizerOptions.builder(model).build()
-                                        )
-                                        recognizer.recognize(ink)
-                                            .addOnSuccessListener { result ->
-                                                syncStatusText = null
-                                                val candidate = result.candidates.firstOrNull()?.text?.lowercase() ?: ""
-                                                if (candidate == "duck") {
-                                                    Toast.makeText(context, "AI recognized a Duck! Spawning 3D model...", Toast.LENGTH_LONG).show()
-                                                    
-                                                    if (appMode == ArAppMode.SOLO) {
-                                                        whiteboardNode?.clearChildNodes()
-                                                    } else {
-                                                        syncClient?.sendClear()
-                                                    }
-                                                    inkBuilder = Ink.builder()
-
-                                                    var minX = Float.MAX_VALUE
-                                                    var maxX = -Float.MAX_VALUE
-                                                    var minY = Float.MAX_VALUE
-                                                    var maxY = -Float.MAX_VALUE
-                                                    for (stroke in ink.strokes) {
-                                                        for (pt in stroke.pointsInGlobalCoordinates) {
-                                                            val xMeters = pt.x / 1000f
-                                                            val yMeters = pt.y / 1000f
-                                                            if (xMeters < minX) minX = xMeters
-                                                            if (xMeters > maxX) maxX = xMeters
-                                                            if (yMeters < minY) minY = yMeters
-                                                            if (yMeters > maxY) maxY = yMeters
-                                                        }
-                                                    }
-                                                    val centerX = if (minX != Float.MAX_VALUE) (minX + maxX) / 2f else 0f
-                                                    val centerY = if (minY != Float.MAX_VALUE) (minY + maxY) / 2f else 0f
-
-                                                    val currentModel = duckModel
-                                                    val board = whiteboardNode
-                                                    if (currentModel != null && board != null) {
-                                                        val modelInstance = modelLoader.createInstance(currentModel.modelInstance.asset)
-                                                        if (modelInstance != null) {
-                                                            val modelNode = ModelNode(modelInstance = modelInstance).apply {
-                                                                scale = io.github.sceneview.math.Scale(0.5f)
-                                                                position = Position(centerX, centerY, 0f)
-                                                            }
-                                                            board.addChildNode(modelNode)
-
-                                                            if (appMode != ArAppMode.SOLO) {
-                                                                val syncNode = ArSyncNode(
-                                                                    type = "duck",
-                                                                    posX = centerX,
-                                                                    posY = centerY,
-                                                                    posZ = 0f,
-                                                                    scale = 0.5f,
-                                                                    colorHex = ""
-                                                                )
-                                                                syncClient?.sendNode(syncNode)
-                                                            }
-                                                        }
-                                                    }
-                                                } else {
-                                                    Toast.makeText(context, "AI recognized '$candidate', but only 'duck' is supported for 3D placement.", Toast.LENGTH_LONG).show()
-                                                }
-                                            }
-                                            .addOnFailureListener { e ->
-                                                syncStatusText = null
-                                                Toast.makeText(context, "Recognition failed: ${e.message}", Toast.LENGTH_SHORT).show()
-                                            }
-                                    }
-                                    .addOnFailureListener { e ->
-                                        syncStatusText = null
-                                        Toast.makeText(context, "Failed to download model: ${e.message}", Toast.LENGTH_SHORT).show()
-                                    }
+                                syncClient?.sendNode(syncNode)
                             }
                         }
-                        .addOnFailureListener { e ->
-                            syncStatusText = null
-                            Toast.makeText(context, "Error checking model: ${e.message}", Toast.LENGTH_SHORT).show()
-                        }
+                    }
                 }
-            }
+            )
+            classifier.recognize(ink)
             Unit
         }
 
@@ -1054,7 +1218,9 @@ fun ArActiveScreen(
                 onWhiteboardWidthChange = { whiteboardWidth = it },
                 whiteboardHeight = whiteboardHeight,
                 onWhiteboardHeightChange = { whiteboardHeight = it },
-                onAiRecognize = onAiRecognize
+                onAiRecognize = onAiRecognize,
+                selectedObjectType = selectedObjectType,
+                onObjectTypeChange = { selectedObjectType = it }
             )
             
             Button(

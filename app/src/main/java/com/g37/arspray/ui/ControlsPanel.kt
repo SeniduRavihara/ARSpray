@@ -17,11 +17,19 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
+// Material icon imports removed for standard lightweight text symbols
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
+import com.g37.arspray.ArObjectType
 
 /**
  * Bottom controls panel containing:
@@ -43,68 +51,132 @@ fun ControlsPanel(
     whiteboardHeight: Float,
     onWhiteboardHeightChange: (Float) -> Unit,
     onAiRecognize: () -> Unit,
+    selectedObjectType: ArObjectType,
+    onObjectTypeChange: (ArObjectType) -> Unit,
     modifier: Modifier = Modifier
 ) {
+    var isExpanded by rememberSaveable { mutableStateOf(true) }
+
     Column(
         modifier = modifier
-            .padding(bottom = 48.dp)
+            .padding(bottom = 24.dp)
             .fillMaxWidth(),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        if (isSprayMode && !isWhiteboardMode) {
-            BrushSizeCard(
-                brushSize = brushSize,
-                onBrushSizeChange = onBrushSizeChange
-            )
-            Spacer(modifier = Modifier.height(16.dp))
-        }
-
-        if (isWhiteboardMode) {
-            WhiteboardSizeCard(
-                boardWidth = whiteboardWidth,
-                boardHeight = whiteboardHeight,
-                onWidthChange = onWhiteboardWidthChange,
-                onHeightChange = onWhiteboardHeightChange,
-                onAiRecognize = onAiRecognize
-            )
-            Spacer(modifier = Modifier.height(16.dp))
-        }
-
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceEvenly
-        ) {
+        if (isExpanded) {
+            // Collapse toggle pill
             Button(
-                onClick = onToggleMode,
+                onClick = { isExpanded = false },
+                shape = RoundedCornerShape(20.dp),
                 colors = ButtonDefaults.buttonColors(
-                    containerColor = if (isSprayMode)
-                        MaterialTheme.colorScheme.secondary
-                    else
-                        MaterialTheme.colorScheme.primary
-                )
+                    containerColor = Color.Black.copy(alpha = 0.5f),
+                    contentColor = Color.White
+                ),
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp, vertical = 4.dp)
             ) {
-                Text(if (isSprayMode) "Switch to Duck" else "Switch to Spray")
+                Text("Hide Controls ▼", style = MaterialTheme.typography.bodySmall)
+            }
+            
+            Spacer(modifier = Modifier.height(12.dp))
+
+            if (isSprayMode && !isWhiteboardMode) {
+                BrushSizeCard(
+                    brushSize = brushSize,
+                    onBrushSizeChange = onBrushSizeChange
+                )
+                Spacer(modifier = Modifier.height(12.dp))
             }
 
-            Button(
-                onClick = onToggleWhiteboardMode,
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = if (isWhiteboardMode)
-                        Color(0xFF4CAF50) // Green when active
-                    else
-                        MaterialTheme.colorScheme.surfaceVariant
+            if (!isSprayMode && !isWhiteboardMode) {
+                ObjectSelectorCard(
+                    selectedType = selectedObjectType,
+                    onTypeSelect = onObjectTypeChange
                 )
-            ) {
-                Text(if (isWhiteboardMode) "Whiteboard: ON" else "Whiteboard: OFF")
+                Spacer(modifier = Modifier.height(12.dp))
             }
 
-            Button(
-                onClick = onClearAll,
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = MaterialTheme.colorScheme.error
+            if (isWhiteboardMode) {
+                WhiteboardSizeCard(
+                    boardWidth = whiteboardWidth,
+                    boardHeight = whiteboardHeight,
+                    onWidthChange = onWhiteboardWidthChange,
+                    onHeightChange = onWhiteboardHeightChange,
+                    onAiRecognize = onAiRecognize
                 )
+                Spacer(modifier = Modifier.height(12.dp))
+            }
+
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 24.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                Text("Clear All")
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Button(
+                        onClick = onToggleMode,
+                        modifier = Modifier.weight(1f),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = if (isSprayMode)
+                                MaterialTheme.colorScheme.secondary
+                            else
+                                MaterialTheme.colorScheme.primary
+                        )
+                    ) {
+                        Text(
+                            text = if (isSprayMode) "Switch to Object" else "Switch to Spray",
+                            maxLines = 1,
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                    }
+
+                    Button(
+                        onClick = onToggleWhiteboardMode,
+                        modifier = Modifier.weight(1f),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = if (isWhiteboardMode)
+                                Color(0xFF4CAF50) // Green when active
+                            else
+                                MaterialTheme.colorScheme.surfaceVariant
+                        )
+                    ) {
+                        Text(
+                            text = if (isWhiteboardMode) "Whiteboard: ON" else "Whiteboard: OFF",
+                            maxLines = 1,
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                    }
+                }
+
+                Button(
+                    onClick = onClearAll,
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.error
+                    )
+                ) {
+                    Text(
+                        text = "Clear All",
+                        maxLines = 1,
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                }
+            }
+        } else {
+            // Collapsed trigger pill
+            Button(
+                onClick = { isExpanded = true },
+                shape = RoundedCornerShape(24.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = Color.Black.copy(alpha = 0.7f),
+                    contentColor = Color.White
+                ),
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 24.dp, vertical = 12.dp)
+            ) {
+                Text("Show Controls ⚙ ▲", style = MaterialTheme.typography.bodyMedium)
             }
         }
     }
@@ -234,5 +306,56 @@ private fun BrushSizeCard(
                 inactiveTrackColor = Color.White.copy(alpha = 0.3f)
             )
         )
+    }
+}
+
+@Composable
+private fun ObjectSelectorCard(
+    selectedType: ArObjectType,
+    onTypeSelect: (ArObjectType) -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 24.dp)
+            .background(Color.Black.copy(alpha = 0.6f), RoundedCornerShape(16.dp))
+            .padding(16.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Text(
+            text = "Select Object to Place",
+            color = Color.White,
+            style = MaterialTheme.typography.titleSmall,
+            modifier = Modifier.align(Alignment.Start)
+        )
+        Spacer(modifier = Modifier.height(12.dp))
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState())
+                .padding(vertical = 4.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            ArObjectType.values().forEach { type ->
+                val isSelected = type == selectedType
+                Button(
+                    onClick = { onTypeSelect(type) },
+                    shape = RoundedCornerShape(24.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = if (isSelected)
+                            MaterialTheme.colorScheme.primary
+                        else
+                            Color.White.copy(alpha = 0.15f),
+                        contentColor = if (isSelected) Color.Black else Color.White
+                    ),
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp, vertical = 8.dp)
+                ) {
+                    Text(
+                        text = type.displayName,
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                }
+            }
+        }
     }
 }

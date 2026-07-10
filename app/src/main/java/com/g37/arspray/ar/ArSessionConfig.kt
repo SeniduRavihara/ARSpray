@@ -13,7 +13,7 @@ import com.google.ar.core.Session
  */
 fun configureArSession(session: Session, config: Config) {
     config.planeFindingMode = Config.PlaneFindingMode.HORIZONTAL_AND_VERTICAL
-    config.lightEstimationMode = Config.LightEstimationMode.AMBIENT_INTENSITY
+    config.lightEstimationMode = Config.LightEstimationMode.DISABLED
     config.depthMode = if (session.isDepthModeSupported(Config.DepthMode.AUTOMATIC))
         Config.DepthMode.AUTOMATIC
     else
