@@ -166,10 +166,11 @@ fun ArActiveScreen(
     var frame by remember { mutableStateOf<Frame?>(null) }
     var arSession by remember { mutableStateOf<Session?>(null) }
     var isModelLoading by remember { mutableStateOf(true) }
-    var duckModel by remember { mutableStateOf<ModelNode?>(null) }
-    var avocadoModel by remember { mutableStateOf<ModelNode?>(null) }
-    var foxModel by remember { mutableStateOf<ModelNode?>(null) }
-    var lanternModel by remember { mutableStateOf<ModelNode?>(null) }
+    var eyeModel by remember { mutableStateOf<ModelNode?>(null) }
+    var heartModel by remember { mutableStateOf<ModelNode?>(null) }
+    var skeletonModel by remember { mutableStateOf<ModelNode?>(null) }
+    var skeletonHeadModel by remember { mutableStateOf<ModelNode?>(null) }
+    var urinarySystemModel by remember { mutableStateOf<ModelNode?>(null) }
 
     // --- Drawing state ---
     var isSprayMode by remember { mutableStateOf(true) }
@@ -262,7 +263,7 @@ fun ArActiveScreen(
     var currentStrokeBuilder by remember { mutableStateOf<Ink.Stroke.Builder?>(null) }
 
     // --- Selected Object Mode Type ---
-    var selectedObjectType by remember { mutableStateOf(ArObjectType.DUCK) }
+    var selectedObjectType by remember { mutableStateOf(ArObjectType.EYE) }
 
     // Automatically update whiteboard dimensions, transparency, rotation, distance, and redraw paths
     LaunchedEffect(
@@ -362,10 +363,11 @@ fun ArActiveScreen(
                                     parent = parentNode,
                                     sprayMaterialInstance = sprayMaterialInstance,
                                     sprayColor = sprayColor,
-                                    duckModel = duckModel,
-                                    avocadoModel = avocadoModel,
-                                    foxModel = foxModel,
-                                    lanternModel = lanternModel,
+                                    eyeModel = eyeModel,
+                                    heartModel = heartModel,
+                                    skeletonModel = skeletonModel,
+                                    skeletonHeadModel = skeletonHeadModel,
+                                    urinarySystemModel = urinarySystemModel,
                                     whiteboardWidth = whiteboardWidth,
                                     whiteboardHeight = whiteboardHeight,
                                     whiteboardPaths = whiteboardPaths,
@@ -419,10 +421,11 @@ fun ArActiveScreen(
                             parent = parentNode,
                             sprayMaterialInstance = sprayMaterialInstance,
                             sprayColor = sprayColor,
-                            duckModel = duckModel,
-                            avocadoModel = avocadoModel,
-                            foxModel = foxModel,
-                            lanternModel = lanternModel,
+                            eyeModel = eyeModel,
+                            heartModel = heartModel,
+                            skeletonModel = skeletonModel,
+                            skeletonHeadModel = skeletonHeadModel,
+                            urinarySystemModel = urinarySystemModel,
                             whiteboardWidth = whiteboardWidth,
                             whiteboardHeight = whiteboardHeight,
                             whiteboardPaths = whiteboardPaths,
@@ -565,32 +568,39 @@ fun ArActiveScreen(
     LaunchedEffect(modelLoader) {
         isModelLoading = true
         try {
-            val model = modelLoader.loadModel("models/duck.glb")
-            duckModel = if (model != null) {
-                ModelNode(modelInstance = modelLoader.createInstance(model)!!)
+            val eM = modelLoader.loadModel("models/eye.glb")
+            eyeModel = if (eM != null) {
+                ModelNode(modelInstance = modelLoader.createInstance(eM)!!)
             } else {
-                Toast.makeText(context, "Model not found in assets/models/duck.glb", Toast.LENGTH_LONG).show()
+                Toast.makeText(context, "Model not found in assets/models/eye.glb", Toast.LENGTH_LONG).show()
                 null
             }
-            val aModel = modelLoader.loadModel("models/avocado.glb")
-            avocadoModel = if (aModel != null) {
-                ModelNode(modelInstance = modelLoader.createInstance(aModel)!!)
+            val hM = modelLoader.loadModel("models/heart.glb")
+            heartModel = if (hM != null) {
+                ModelNode(modelInstance = modelLoader.createInstance(hM)!!)
             } else {
-                Toast.makeText(context, "Model not found in assets/models/avocado.glb", Toast.LENGTH_LONG).show()
+                Toast.makeText(context, "Model not found in assets/models/heart.glb", Toast.LENGTH_LONG).show()
                 null
             }
-            val fModel = modelLoader.loadModel("models/fox.glb")
-            foxModel = if (fModel != null) {
-                ModelNode(modelInstance = modelLoader.createInstance(fModel)!!)
+            val sM = modelLoader.loadModel("models/human_skeleton.glb")
+            skeletonModel = if (sM != null) {
+                ModelNode(modelInstance = modelLoader.createInstance(sM)!!)
             } else {
-                Toast.makeText(context, "Model not found in assets/models/fox.glb", Toast.LENGTH_LONG).show()
+                Toast.makeText(context, "Model not found in assets/models/human_skeleton.glb", Toast.LENGTH_LONG).show()
                 null
             }
-            val lModel = modelLoader.loadModel("models/lantern.glb")
-            lanternModel = if (lModel != null) {
-                ModelNode(modelInstance = modelLoader.createInstance(lModel)!!)
+            val shM = modelLoader.loadModel("models/skeleton_head.glb")
+            skeletonHeadModel = if (shM != null) {
+                ModelNode(modelInstance = modelLoader.createInstance(shM)!!)
             } else {
-                Toast.makeText(context, "Model not found in assets/models/lantern.glb", Toast.LENGTH_LONG).show()
+                Toast.makeText(context, "Model not found in assets/models/skeleton_head.glb", Toast.LENGTH_LONG).show()
+                null
+            }
+            val uM = modelLoader.loadModel("models/urinary_system.glb")
+            urinarySystemModel = if (uM != null) {
+                ModelNode(modelInstance = modelLoader.createInstance(uM)!!)
+            } else {
+                Toast.makeText(context, "Model not found in assets/models/urinary_system.glb", Toast.LENGTH_LONG).show()
                 null
             }
         } catch (e: Exception) {
@@ -716,8 +726,8 @@ fun ArActiveScreen(
                                         localPos.y >= -halfHeight && localPos.y <= halfHeight
                                     ) {
                                         val spawnedNode = when (selectedObjectType) {
-                                            ArObjectType.DUCK -> {
-                                                val currentModel = duckModel
+                                            ArObjectType.EYE -> {
+                                                val currentModel = eyeModel
                                                 val modelInstance = currentModel?.let { modelLoader.createInstance(it.modelInstance.asset) }
                                                 if (modelInstance != null) {
                                                     ModelNode(modelInstance = modelInstance).apply {
@@ -726,32 +736,42 @@ fun ArActiveScreen(
                                                     }
                                                 } else null
                                             }
-                                            ArObjectType.AVOCADO -> {
-                                                val currentModel = avocadoModel
-                                                val modelInstance = currentModel?.let { modelLoader.createInstance(it.modelInstance.asset) }
-                                                if (modelInstance != null) {
-                                                    ModelNode(modelInstance = modelInstance).apply {
-                                                        scale = io.github.sceneview.math.Scale(3.0f)
-                                                        position = Position(localPos.x, localPos.y, 0f)
-                                                    }
-                                                } else null
-                                            }
-                                            ArObjectType.FOX -> {
-                                                val currentModel = foxModel
-                                                val modelInstance = currentModel?.let { modelLoader.createInstance(it.modelInstance.asset) }
-                                                if (modelInstance != null) {
-                                                    ModelNode(modelInstance = modelInstance).apply {
-                                                        scale = io.github.sceneview.math.Scale(0.02f)
-                                                        position = Position(localPos.x, localPos.y, 0f)
-                                                    }
-                                                } else null
-                                            }
-                                            ArObjectType.LANTERN -> {
-                                                val currentModel = lanternModel
+                                            ArObjectType.HEART -> {
+                                                val currentModel = heartModel
                                                 val modelInstance = currentModel?.let { modelLoader.createInstance(it.modelInstance.asset) }
                                                 if (modelInstance != null) {
                                                     ModelNode(modelInstance = modelInstance).apply {
                                                         scale = io.github.sceneview.math.Scale(0.5f)
+                                                        position = Position(localPos.x, localPos.y, 0f)
+                                                    }
+                                                } else null
+                                            }
+                                            ArObjectType.SKELETON -> {
+                                                val currentModel = skeletonModel
+                                                val modelInstance = currentModel?.let { modelLoader.createInstance(it.modelInstance.asset) }
+                                                if (modelInstance != null) {
+                                                    ModelNode(modelInstance = modelInstance).apply {
+                                                        scale = io.github.sceneview.math.Scale(0.15f)
+                                                        position = Position(localPos.x, localPos.y, 0f)
+                                                    }
+                                                } else null
+                                            }
+                                            ArObjectType.SKELETON_HEAD -> {
+                                                val currentModel = skeletonHeadModel
+                                                val modelInstance = currentModel?.let { modelLoader.createInstance(it.modelInstance.asset) }
+                                                if (modelInstance != null) {
+                                                    ModelNode(modelInstance = modelInstance).apply {
+                                                        scale = io.github.sceneview.math.Scale(0.3f)
+                                                        position = Position(localPos.x, localPos.y, 0f)
+                                                    }
+                                                } else null
+                                            }
+                                            ArObjectType.URINARY_SYSTEM -> {
+                                                val currentModel = urinarySystemModel
+                                                val modelInstance = currentModel?.let { modelLoader.createInstance(it.modelInstance.asset) }
+                                                if (modelInstance != null) {
+                                                    ModelNode(modelInstance = modelInstance).apply {
+                                                        scale = io.github.sceneview.math.Scale(0.2f)
                                                         position = Position(localPos.x, localPos.y, 0f)
                                                     }
                                                 } else null
@@ -782,10 +802,11 @@ fun ArActiveScreen(
                                             if (appMode != ArAppMode.SOLO) {
                                                 val syncNode = ArSyncNode(
                                                     type = when (selectedObjectType) {
-                                                        ArObjectType.DUCK -> "duck"
-                                                        ArObjectType.AVOCADO -> "avocado"
-                                                        ArObjectType.FOX -> "fox"
-                                                        ArObjectType.LANTERN -> "lantern"
+                                                        ArObjectType.EYE -> "eye"
+                                                        ArObjectType.HEART -> "heart"
+                                                        ArObjectType.SKELETON -> "skeleton"
+                                                        ArObjectType.SKELETON_HEAD -> "skeleton_head"
+                                                        ArObjectType.URINARY_SYSTEM -> "urinary_system"
                                                         ArObjectType.CUBE -> "cube"
                                                         ArObjectType.SPHERE -> "sphere_object"
                                                     },
@@ -846,47 +867,58 @@ fun ArActiveScreen(
 
                                 hitResult?.createAnchorOrNull()?.let { anchor ->
                                     val targetNode = when (selectedObjectType) {
-                                        ArObjectType.DUCK -> {
-                                            val currentModel = duckModel
+                                        ArObjectType.EYE -> {
+                                            val currentModel = eyeModel
                                             if (currentModel != null) {
                                                 val modelInstance = modelLoader.createInstance(currentModel.modelInstance.asset)
                                                 if (modelInstance != null) {
-                                                    ModelNode(modelInstance = modelInstance).apply {
-                                                        scale = io.github.sceneview.math.Scale(0.5f)
-                                                    }
+                                                     ModelNode(modelInstance = modelInstance).apply {
+                                                         scale = io.github.sceneview.math.Scale(0.5f)
+                                                     }
                                                 } else null
                                             } else null
                                         }
-                                        ArObjectType.AVOCADO -> {
-                                            val currentModel = avocadoModel
+                                        ArObjectType.HEART -> {
+                                            val currentModel = heartModel
                                             if (currentModel != null) {
                                                 val modelInstance = modelLoader.createInstance(currentModel.modelInstance.asset)
                                                 if (modelInstance != null) {
-                                                    ModelNode(modelInstance = modelInstance).apply {
-                                                        scale = io.github.sceneview.math.Scale(3.0f)
-                                                    }
+                                                     ModelNode(modelInstance = modelInstance).apply {
+                                                         scale = io.github.sceneview.math.Scale(0.5f)
+                                                     }
                                                 } else null
                                             } else null
                                         }
-                                        ArObjectType.FOX -> {
-                                            val currentModel = foxModel
+                                        ArObjectType.SKELETON -> {
+                                            val currentModel = skeletonModel
                                             if (currentModel != null) {
                                                 val modelInstance = modelLoader.createInstance(currentModel.modelInstance.asset)
                                                 if (modelInstance != null) {
-                                                    ModelNode(modelInstance = modelInstance).apply {
-                                                        scale = io.github.sceneview.math.Scale(0.02f)
-                                                    }
+                                                     ModelNode(modelInstance = modelInstance).apply {
+                                                         scale = io.github.sceneview.math.Scale(0.15f)
+                                                     }
                                                 } else null
                                             } else null
                                         }
-                                        ArObjectType.LANTERN -> {
-                                            val currentModel = lanternModel
+                                        ArObjectType.SKELETON_HEAD -> {
+                                            val currentModel = skeletonHeadModel
                                             if (currentModel != null) {
                                                 val modelInstance = modelLoader.createInstance(currentModel.modelInstance.asset)
                                                 if (modelInstance != null) {
-                                                    ModelNode(modelInstance = modelInstance).apply {
-                                                        scale = io.github.sceneview.math.Scale(0.5f)
-                                                    }
+                                                     ModelNode(modelInstance = modelInstance).apply {
+                                                         scale = io.github.sceneview.math.Scale(0.3f)
+                                                     }
+                                                } else null
+                                            } else null
+                                        }
+                                        ArObjectType.URINARY_SYSTEM -> {
+                                            val currentModel = urinarySystemModel
+                                            if (currentModel != null) {
+                                                val modelInstance = modelLoader.createInstance(currentModel.modelInstance.asset)
+                                                if (modelInstance != null) {
+                                                     ModelNode(modelInstance = modelInstance).apply {
+                                                         scale = io.github.sceneview.math.Scale(0.2f)
+                                                     }
                                                 } else null
                                             } else null
                                         }
@@ -922,10 +954,11 @@ fun ArActiveScreen(
                                                 val relativePos = targetNode.position
                                                 val syncNode = ArSyncNode(
                                                     type = when (selectedObjectType) {
-                                                        ArObjectType.DUCK -> "duck"
-                                                        ArObjectType.AVOCADO -> "avocado"
-                                                        ArObjectType.FOX -> "fox"
-                                                        ArObjectType.LANTERN -> "lantern"
+                                                        ArObjectType.EYE -> "eye"
+                                                        ArObjectType.HEART -> "heart"
+                                                        ArObjectType.SKELETON -> "skeleton"
+                                                        ArObjectType.SKELETON_HEAD -> "skeleton_head"
+                                                         ArObjectType.URINARY_SYSTEM -> "urinary_system"
                                                         ArObjectType.CUBE -> "cube"
                                                         ArObjectType.SPHERE -> "sphere_object"
                                                     },
@@ -1071,7 +1104,7 @@ fun ArActiveScreen(
                     whiteboardPaths = emptyList()
                 },
                 onSuccess = { centerX, centerY ->
-                    val currentModel = duckModel
+                    val currentModel = eyeModel
                     val board = whiteboardNode
                     if (currentModel != null && board != null) {
                         val modelInstance = modelLoader.createInstance(currentModel.modelInstance.asset)
@@ -1084,7 +1117,7 @@ fun ArActiveScreen(
 
                             if (appMode != ArAppMode.SOLO) {
                                 val syncNode = ArSyncNode(
-                                    type = "duck",
+                                    type = "eye",
                                     posX = centerX,
                                     posY = centerY,
                                     posZ = 0f,
