@@ -173,7 +173,7 @@ fun ArActiveScreen(
     var urinarySystemModel by remember { mutableStateOf<ModelNode?>(null) }
 
     // --- Drawing state ---
-    var isSprayMode by remember { mutableStateOf(true) }
+    var isSprayMode by remember { mutableStateOf(false) }
     val sprayColor = Color.Magenta
     var brushSize by remember { mutableFloatStateOf(0.02f) }
     // Cache a single material instance for ALL spray spheres — creating one per sphere
@@ -612,6 +612,18 @@ fun ArActiveScreen(
 
     // --- Layout ---
     Box(modifier = Modifier.fillMaxSize()) {
+
+        // Small Logout Button in Top-Left Corner
+        Button(
+            onClick = onExit,
+            colors = ButtonDefaults.buttonColors(containerColor = Color.Red.copy(alpha = 0.7f)),
+            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+            modifier = Modifier
+                .align(Alignment.TopStart)
+                .padding(top = 16.dp, start = 16.dp)
+        ) {
+            Text("Logout", color = Color.White, fontSize = 12.sp)
+        }
 
         ARScene(
             modifier = Modifier.fillMaxSize(),
@@ -1069,12 +1081,7 @@ fun ArActiveScreen(
                 }
             }
 
-            StatusOverlay(
-                isSprayMode = isSprayMode,
-                selectedObjectType = selectedObjectType,
-                isWhiteboardMode = isWhiteboardMode,
-                modifier = Modifier
-            )
+
         }
 
         if (isModelLoading) {
@@ -1187,17 +1194,7 @@ fun ArActiveScreen(
                 selectedObjectType = selectedObjectType,
                 onObjectTypeChange = { selectedObjectType = it }
             )
-            
-            Button(
-                onClick = onExit,
-                colors = ButtonDefaults.buttonColors(containerColor = Color.DarkGray),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 24.dp)
-                    .padding(bottom = 16.dp)
-            ) {
-                Text("Exit Session")
-            }
+
         }
 
         // Host QR Code Dialog overlay
@@ -1284,16 +1281,6 @@ fun ArActiveScreen(
             onClose = { isEditCanvasOpen = false }
         )
 
-        // Version Indicator Overlay
-        Text(
-            text = "v1.2.0",
-            color = Color.White.copy(alpha = 0.5f),
-            fontSize = 11.sp,
-            modifier = Modifier
-                .align(Alignment.TopEnd)
-                .padding(top = 16.dp, end = 16.dp)
-                .background(Color.Black.copy(alpha = 0.5f), RoundedCornerShape(4.dp))
-                .padding(horizontal = 6.dp, vertical = 2.dp)
-        )
+
     }
 }
