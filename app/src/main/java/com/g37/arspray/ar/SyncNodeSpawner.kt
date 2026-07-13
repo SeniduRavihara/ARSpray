@@ -45,7 +45,7 @@ fun spawnSyncNode(
             val modelInstance = modelLoader.createInstance(eyeModel.modelInstance.asset)
             if (modelInstance != null) {
                 val modelNode = ModelNode(modelInstance = modelInstance).apply {
-                    scale = io.github.sceneview.math.Scale(0.5f)
+                    scale = io.github.sceneview.math.Scale(syncNode.scale)
                     position = Position(syncNode.posX, syncNode.posY, syncNode.posZ)
                 }
                 parent.addChildNode(modelNode)
@@ -56,7 +56,7 @@ fun spawnSyncNode(
             val modelInstance = modelLoader.createInstance(heartModel.modelInstance.asset)
             if (modelInstance != null) {
                 val modelNode = ModelNode(modelInstance = modelInstance).apply {
-                    scale = io.github.sceneview.math.Scale(0.5f)
+                    scale = io.github.sceneview.math.Scale(syncNode.scale)
                     position = Position(syncNode.posX, syncNode.posY, syncNode.posZ)
                 }
                 parent.addChildNode(modelNode)
@@ -67,7 +67,7 @@ fun spawnSyncNode(
             val modelInstance = modelLoader.createInstance(skeletonModel.modelInstance.asset)
             if (modelInstance != null) {
                 val modelNode = ModelNode(modelInstance = modelInstance).apply {
-                    scale = io.github.sceneview.math.Scale(0.15f)
+                    scale = io.github.sceneview.math.Scale(syncNode.scale)
                     position = Position(syncNode.posX, syncNode.posY, syncNode.posZ)
                 }
                 parent.addChildNode(modelNode)
@@ -78,7 +78,7 @@ fun spawnSyncNode(
             val modelInstance = modelLoader.createInstance(skeletonHeadModel.modelInstance.asset)
             if (modelInstance != null) {
                 val modelNode = ModelNode(modelInstance = modelInstance).apply {
-                    scale = io.github.sceneview.math.Scale(0.3f)
+                    scale = io.github.sceneview.math.Scale(syncNode.scale)
                     position = Position(syncNode.posX, syncNode.posY, syncNode.posZ)
                 }
                 parent.addChildNode(modelNode)
@@ -89,7 +89,7 @@ fun spawnSyncNode(
             val modelInstance = modelLoader.createInstance(urinarySystemModel.modelInstance.asset)
             if (modelInstance != null) {
                 val modelNode = ModelNode(modelInstance = modelInstance).apply {
-                    scale = io.github.sceneview.math.Scale(0.2f)
+                    scale = io.github.sceneview.math.Scale(syncNode.scale)
                     position = Position(syncNode.posX, syncNode.posY, syncNode.posZ)
                 }
                 parent.addChildNode(modelNode)

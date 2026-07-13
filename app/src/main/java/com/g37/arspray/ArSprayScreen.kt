@@ -176,6 +176,7 @@ fun ArActiveScreen(
     var isSprayMode by remember { mutableStateOf(false) }
     val sprayColor = Color.Magenta
     var brushSize by remember { mutableFloatStateOf(0.02f) }
+    var objectScale by remember { mutableFloatStateOf(2.0f) }
     // Cache a single material instance for ALL spray spheres — creating one per sphere
     // was exhausting GPU memory and crashing the app within seconds of drawing.
     val sprayMaterialInstance = remember(materialLoader) {
@@ -737,53 +738,59 @@ fun ArActiveScreen(
                                     if (localPos.x >= -halfWidth && localPos.x <= halfWidth &&
                                         localPos.y >= -halfHeight && localPos.y <= halfHeight
                                     ) {
+                                        var computedScale = 1.0f
                                         val spawnedNode = when (selectedObjectType) {
                                             ArObjectType.EYE -> {
+                                                computedScale = 1.0f * objectScale
                                                 val currentModel = eyeModel
                                                 val modelInstance = currentModel?.let { modelLoader.createInstance(it.modelInstance.asset) }
                                                 if (modelInstance != null) {
                                                     ModelNode(modelInstance = modelInstance).apply {
-                                                        scale = io.github.sceneview.math.Scale(0.5f)
+                                                        scale = io.github.sceneview.math.Scale(computedScale)
                                                         position = Position(localPos.x, localPos.y, 0f)
                                                     }
                                                 } else null
                                             }
                                             ArObjectType.HEART -> {
+                                                computedScale = 1.0f * objectScale
                                                 val currentModel = heartModel
                                                 val modelInstance = currentModel?.let { modelLoader.createInstance(it.modelInstance.asset) }
                                                 if (modelInstance != null) {
                                                     ModelNode(modelInstance = modelInstance).apply {
-                                                        scale = io.github.sceneview.math.Scale(0.5f)
+                                                        scale = io.github.sceneview.math.Scale(computedScale)
                                                         position = Position(localPos.x, localPos.y, 0f)
                                                     }
                                                 } else null
                                             }
                                             ArObjectType.SKELETON -> {
+                                                computedScale = 0.5f * objectScale
                                                 val currentModel = skeletonModel
                                                 val modelInstance = currentModel?.let { modelLoader.createInstance(it.modelInstance.asset) }
                                                 if (modelInstance != null) {
                                                     ModelNode(modelInstance = modelInstance).apply {
-                                                        scale = io.github.sceneview.math.Scale(0.15f)
+                                                        scale = io.github.sceneview.math.Scale(computedScale)
                                                         position = Position(localPos.x, localPos.y, 0f)
                                                     }
                                                 } else null
                                             }
                                             ArObjectType.SKELETON_HEAD -> {
+                                                computedScale = 0.6f * objectScale
                                                 val currentModel = skeletonHeadModel
                                                 val modelInstance = currentModel?.let { modelLoader.createInstance(it.modelInstance.asset) }
                                                 if (modelInstance != null) {
                                                     ModelNode(modelInstance = modelInstance).apply {
-                                                        scale = io.github.sceneview.math.Scale(0.3f)
+                                                        scale = io.github.sceneview.math.Scale(computedScale)
                                                         position = Position(localPos.x, localPos.y, 0f)
                                                     }
                                                 } else null
                                             }
                                             ArObjectType.URINARY_SYSTEM -> {
+                                                computedScale = 0.5f * objectScale
                                                 val currentModel = urinarySystemModel
                                                 val modelInstance = currentModel?.let { modelLoader.createInstance(it.modelInstance.asset) }
                                                 if (modelInstance != null) {
                                                     ModelNode(modelInstance = modelInstance).apply {
-                                                        scale = io.github.sceneview.math.Scale(0.2f)
+                                                        scale = io.github.sceneview.math.Scale(computedScale)
                                                         position = Position(localPos.x, localPos.y, 0f)
                                                     }
                                                 } else null
@@ -878,62 +885,68 @@ fun ArActiveScreen(
                                     }
 
                                 hitResult?.createAnchorOrNull()?.let { anchor ->
+                                    var computedScale = 1.0f
                                     val targetNode = when (selectedObjectType) {
                                         ArObjectType.EYE -> {
+                                            computedScale = 1.0f * objectScale
                                             val currentModel = eyeModel
                                             if (currentModel != null) {
                                                 val modelInstance = modelLoader.createInstance(currentModel.modelInstance.asset)
                                                 if (modelInstance != null) {
                                                      ModelNode(modelInstance = modelInstance).apply {
-                                                         scale = io.github.sceneview.math.Scale(0.5f)
-                                                     }
-                                                } else null
-                                            } else null
-                                        }
-                                        ArObjectType.HEART -> {
-                                            val currentModel = heartModel
-                                            if (currentModel != null) {
-                                                val modelInstance = modelLoader.createInstance(currentModel.modelInstance.asset)
-                                                if (modelInstance != null) {
-                                                     ModelNode(modelInstance = modelInstance).apply {
-                                                         scale = io.github.sceneview.math.Scale(0.5f)
-                                                     }
-                                                } else null
-                                            } else null
-                                        }
-                                        ArObjectType.SKELETON -> {
-                                            val currentModel = skeletonModel
-                                            if (currentModel != null) {
-                                                val modelInstance = modelLoader.createInstance(currentModel.modelInstance.asset)
-                                                if (modelInstance != null) {
-                                                     ModelNode(modelInstance = modelInstance).apply {
-                                                         scale = io.github.sceneview.math.Scale(0.15f)
-                                                     }
-                                                } else null
-                                            } else null
-                                        }
-                                        ArObjectType.SKELETON_HEAD -> {
-                                            val currentModel = skeletonHeadModel
-                                            if (currentModel != null) {
-                                                val modelInstance = modelLoader.createInstance(currentModel.modelInstance.asset)
-                                                if (modelInstance != null) {
-                                                     ModelNode(modelInstance = modelInstance).apply {
-                                                         scale = io.github.sceneview.math.Scale(0.3f)
-                                                     }
-                                                } else null
-                                            } else null
-                                        }
-                                        ArObjectType.URINARY_SYSTEM -> {
-                                            val currentModel = urinarySystemModel
-                                            if (currentModel != null) {
-                                                val modelInstance = modelLoader.createInstance(currentModel.modelInstance.asset)
-                                                if (modelInstance != null) {
-                                                     ModelNode(modelInstance = modelInstance).apply {
-                                                         scale = io.github.sceneview.math.Scale(0.2f)
-                                                     }
-                                                } else null
-                                            } else null
-                                        }
+                                                          scale = io.github.sceneview.math.Scale(computedScale)
+                                                      }
+                                                 } else null
+                                             } else null
+                                         }
+                                         ArObjectType.HEART -> {
+                                             computedScale = 1.0f * objectScale
+                                             val currentModel = heartModel
+                                             if (currentModel != null) {
+                                                 val modelInstance = modelLoader.createInstance(currentModel.modelInstance.asset)
+                                                 if (modelInstance != null) {
+                                                      ModelNode(modelInstance = modelInstance).apply {
+                                                          scale = io.github.sceneview.math.Scale(computedScale)
+                                                      }
+                                                 } else null
+                                             } else null
+                                         }
+                                         ArObjectType.SKELETON -> {
+                                             computedScale = 0.5f * objectScale
+                                             val currentModel = skeletonModel
+                                             if (currentModel != null) {
+                                                 val modelInstance = modelLoader.createInstance(currentModel.modelInstance.asset)
+                                                 if (modelInstance != null) {
+                                                      ModelNode(modelInstance = modelInstance).apply {
+                                                          scale = io.github.sceneview.math.Scale(computedScale)
+                                                      }
+                                                 } else null
+                                             } else null
+                                         }
+                                         ArObjectType.SKELETON_HEAD -> {
+                                             computedScale = 0.6f * objectScale
+                                             val currentModel = skeletonHeadModel
+                                             if (currentModel != null) {
+                                                 val modelInstance = modelLoader.createInstance(currentModel.modelInstance.asset)
+                                                 if (modelInstance != null) {
+                                                      ModelNode(modelInstance = modelInstance).apply {
+                                                          scale = io.github.sceneview.math.Scale(computedScale)
+                                                      }
+                                                 } else null
+                                             } else null
+                                         }
+                                         ArObjectType.URINARY_SYSTEM -> {
+                                             computedScale = 0.5f * objectScale
+                                             val currentModel = urinarySystemModel
+                                             if (currentModel != null) {
+                                                 val modelInstance = modelLoader.createInstance(currentModel.modelInstance.asset)
+                                                 if (modelInstance != null) {
+                                                      ModelNode(modelInstance = modelInstance).apply {
+                                                          scale = io.github.sceneview.math.Scale(computedScale)
+                                                      }
+                                                 } else null
+                                             } else null
+                                         }
                                         ArObjectType.CUBE -> {
                                             CubeNode(
                                                 engine = engine,
@@ -977,7 +990,7 @@ fun ArActiveScreen(
                                                     posX = relativePos.x,
                                                     posY = relativePos.y,
                                                     posZ = relativePos.z,
-                                                    scale = 0.5f,
+                                                    scale = computedScale,
                                                     colorHex = ""
                                                 )
                                                 firebaseSync?.sendNode(syncNode)
@@ -1192,7 +1205,9 @@ fun ArActiveScreen(
                 onWhiteboardDistanceChange = { whiteboardDistance = it },
                 onAiRecognize = onAiRecognize,
                 selectedObjectType = selectedObjectType,
-                onObjectTypeChange = { selectedObjectType = it }
+                onObjectTypeChange = { selectedObjectType = it },
+                objectScale = objectScale,
+                onObjectScaleChange = { objectScale = it }
             )
 
         }

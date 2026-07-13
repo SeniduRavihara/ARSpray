@@ -69,6 +69,8 @@ fun ControlsPanel(
     onAiRecognize: () -> Unit,
     selectedObjectType: ArObjectType,
     onObjectTypeChange: (ArObjectType) -> Unit,
+    objectScale: Float,
+    onObjectScaleChange: (Float) -> Unit,
     modifier: Modifier = Modifier
 ) {
     var isExpanded by rememberSaveable { mutableStateOf(true) }
@@ -99,7 +101,9 @@ fun ControlsPanel(
             if (!isSprayMode && !isWhiteboardMode) {
                 ObjectSelectorCard(
                     selectedType = selectedObjectType,
-                    onTypeSelect = onObjectTypeChange
+                    onTypeSelect = onObjectTypeChange,
+                    objectScale = objectScale,
+                    onObjectScaleChange = onObjectScaleChange
                 )
                 Spacer(modifier = Modifier.height(12.dp))
             }
@@ -307,7 +311,9 @@ private fun SliderRow(
 @Composable
 private fun ObjectSelectorCard(
     selectedType: ArObjectType,
-    onTypeSelect: (ArObjectType) -> Unit
+    onTypeSelect: (ArObjectType) -> Unit,
+    objectScale: Float,
+    onObjectScaleChange: (Float) -> Unit
 ) {
     Column(
         modifier = Modifier
@@ -317,6 +323,24 @@ private fun ObjectSelectorCard(
             .padding(16.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
+        Text(
+            text = "Model Placement Scale: %.1fx".format(objectScale),
+            color = Color.White,
+            style = MaterialTheme.typography.titleSmall,
+            modifier = Modifier.align(Alignment.Start)
+        )
+        Spacer(modifier = Modifier.height(4.dp))
+        Slider(
+            value = objectScale,
+            onValueChange = onObjectScaleChange,
+            valueRange = 0.5f..8.0f,
+            colors = SliderDefaults.colors(
+                thumbColor = MaterialTheme.colorScheme.primary,
+                activeTrackColor = MaterialTheme.colorScheme.primary,
+                inactiveTrackColor = Color.White.copy(alpha = 0.3f)
+            )
+        )
+        Spacer(modifier = Modifier.height(12.dp))
         Text(
             text = "Select Object to Place",
             color = Color.White,
