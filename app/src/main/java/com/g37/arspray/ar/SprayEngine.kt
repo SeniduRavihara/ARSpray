@@ -51,7 +51,7 @@ fun interpolateAndDraw(
 private const val STROKE_BREAK_THRESHOLD_MS = 150L
 
 // Minimum pixel distance between interpolated points
-private const val MIN_STEP_PX = 10f
+private const val MIN_STEP_PX = 5f
 
 // Maximum interpolated points generated per touch event
-private const val MAX_STEPS = 15f
+private const val MAX_STEPS = 30f

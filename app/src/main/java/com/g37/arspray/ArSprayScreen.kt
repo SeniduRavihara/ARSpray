@@ -36,6 +36,18 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.clickable
+import androidx.compose.material3.Slider
+import com.google.android.filament.Texture
+import java.nio.ByteBuffer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -80,16 +92,10 @@ import io.github.sceneview.rememberOnGestureListener
 import java.net.URI
 import com.google.mlkit.vision.digitalink.recognition.Ink
 import com.g37.arspray.ai.AutoDrawClassifier
-
-enum class ArAppMode {
-    LOBBY,
-    SOLO,
-    HOST_LOBBY,
-    HOST_ACTIVE,
-    JOIN_LOBBY,
-    JOIN_SCANNING,
-    JOIN_ACTIVE
-}
+import com.g37.arspray.model.DrawingStroke
+import com.g37.arspray.model.ArAppMode
+import com.g37.arspray.ui.WhiteboardDrawingOverlay
+import com.g37.arspray.ar.spawnSyncNode
 
 @Composable
 fun ArSprayScreen() {
@@ -170,6 +176,12 @@ fun ArActiveScreen(
     var isSprayMode by remember { mutableStateOf(true) }
     val sprayColor = Color.Magenta
     var brushSize by remember { mutableFloatStateOf(0.02f) }
+    // Cache a single material instance for ALL spray spheres — creating one per sphere
+    // was exhausting GPU memory and crashing the app within seconds of drawing.
+    val sprayMaterialInstance = remember(materialLoader) {
+        materialLoader.createColorInstance(Color.Magenta)
+    }
+    val displayMetrics = context.resources.displayMetrics
 
     // --- Whiteboard state ---
     var isWhiteboardMode by remember { mutableStateOf(false) }
@@ -183,10 +195,68 @@ fun ArActiveScreen(
     var whiteboardRoll by remember { mutableFloatStateOf(0f) }
     var whiteboardDistance by remember { mutableFloatStateOf(0f) }
 
+    // --- Whiteboard drawing canvas and texture state ---
+    var isEditCanvasOpen by remember { mutableStateOf(false) }
+    var whiteboardBitmap by remember { mutableStateOf<android.graphics.Bitmap?>(null) }
+    var whiteboardTexture by remember { mutableStateOf<com.google.android.filament.Texture?>(null) }
+    var whiteboardPaths by remember { mutableStateOf(listOf<DrawingStroke>()) }
+
+    // Helper to upload Android Bitmap to Filament Texture
+    val updateTextureFromBitmap = remember(engine) {
+        { bmp: android.graphics.Bitmap, tex: com.google.android.filament.Texture ->
+            val buffer = java.nio.ByteBuffer.allocateDirect(bmp.byteCount)
+            bmp.copyPixelsToBuffer(buffer)
+            buffer.flip()
+            tex.setImage(
+                engine,
+                0,
+                com.google.android.filament.Texture.PixelBufferDescriptor(
+                    buffer,
+                    com.google.android.filament.Texture.Format.RGBA,
+                    com.google.android.filament.Texture.Type.UBYTE
+                )
+            )
+            buffer.clear()
+        }
+    }
+
+    // Helper to get or initialize whiteboard bitmap, texture, and texture-based material instance
+    val getOrCreateWhiteboardMaterial = remember(materialLoader, engine, isWhiteboardTransparent) {
+        {
+            var bmp = whiteboardBitmap
+            var tex = whiteboardTexture
+            if (bmp == null || tex == null) {
+                bmp = android.graphics.Bitmap.createBitmap(1024, 1024, android.graphics.Bitmap.Config.ARGB_8888)
+                val canvas = android.graphics.Canvas(bmp)
+                if (isWhiteboardTransparent) {
+                    canvas.drawColor(android.graphics.Color.TRANSPARENT, android.graphics.PorterDuff.Mode.CLEAR)
+                } else {
+                    canvas.drawColor(android.graphics.Color.WHITE)
+                }
+                whiteboardBitmap = bmp
+
+                tex = com.google.android.filament.Texture.Builder()
+                    .width(1024)
+                    .height(1024)
+                    .levels(1)
+                    .sampler(com.google.android.filament.Texture.Sampler.SAMPLER_2D)
+                    .format(com.google.android.filament.Texture.InternalFormat.SRGB8_A8)
+                    .build(engine)
+
+                whiteboardTexture = tex
+                updateTextureFromBitmap(bmp, tex)
+            }
+            materialLoader.createTextureInstance(tex)
+        }
+    }
+
     // --- Gesture tracking state (for stroke interpolation) ---
     var lastTouchX by remember { mutableStateOf<Float?>(null) }
     var lastTouchY by remember { mutableStateOf<Float?>(null) }
     var lastTouchTime by remember { mutableLongStateOf(0L) }
+    // Last drawn whiteboard-local position (for connecting line segments)
+    var lastWbLocalX by remember { mutableStateOf<Float?>(null) }
+    var lastWbLocalY by remember { mutableStateOf<Float?>(null) }
 
     // --- ML Kit Ink and Recognizer state ---
     var inkBuilder by remember { mutableStateOf(Ink.builder()) }
@@ -195,7 +265,7 @@ fun ArActiveScreen(
     // --- Selected Object Mode Type ---
     var selectedObjectType by remember { mutableStateOf(ArObjectType.DUCK) }
 
-    // Automatically update whiteboard dimensions, transparency, rotation, and distance
+    // Automatically update whiteboard dimensions, transparency, rotation, distance, and redraw paths
     LaunchedEffect(
         whiteboardWidth,
         whiteboardHeight,
@@ -204,16 +274,51 @@ fun ArActiveScreen(
         whiteboardPitch,
         whiteboardRoll,
         whiteboardDistance,
-        whiteboardNode
+        whiteboardNode,
+        whiteboardPaths
     ) {
         val board = whiteboardNode ?: return@LaunchedEffect
         board.scale = io.github.sceneview.math.Scale(whiteboardWidth, whiteboardHeight, 0.02f)
-        try {
-            val targetColor = if (isWhiteboardTransparent) Color.Transparent else Color(0xFFF5F5F5)
-            board.materialInstance = materialLoader.createColorInstance(targetColor)
-        } catch (e: Exception) {
-            // Fallback for material creation
+        
+        val bmp = whiteboardBitmap
+        val tex = whiteboardTexture
+        if (bmp != null && tex != null) {
+            val canvas = android.graphics.Canvas(bmp)
+            if (isWhiteboardTransparent) {
+                canvas.drawColor(android.graphics.Color.TRANSPARENT, android.graphics.PorterDuff.Mode.CLEAR)
+            } else {
+                canvas.drawColor(android.graphics.Color.WHITE)
+            }
+            
+            whiteboardPaths.forEach { stroke ->
+                val paint = android.graphics.Paint().apply {
+                    if (stroke.isEraser) {
+                        if (isWhiteboardTransparent) {
+                            color = android.graphics.Color.TRANSPARENT
+                            xfermode = android.graphics.PorterDuffXfermode(android.graphics.PorterDuff.Mode.CLEAR)
+                        } else {
+                            color = android.graphics.Color.WHITE
+                        }
+                    } else {
+                        color = stroke.color.toArgb()
+                    }
+                    style = android.graphics.Paint.Style.STROKE
+                    strokeWidth = stroke.width
+                    strokeCap = android.graphics.Paint.Cap.ROUND
+                    strokeJoin = android.graphics.Paint.Join.ROUND
+                }
+                val path = android.graphics.Path()
+                if (stroke.points.isNotEmpty()) {
+                    path.moveTo(stroke.points.first().x, stroke.points.first().y)
+                    for (i in 1 until stroke.points.size) {
+                        path.lineTo(stroke.points[i].x, stroke.points[i].y)
+                    }
+                    canvas.drawPath(path, paint)
+                }
+            }
+            updateTextureFromBitmap(bmp, tex)
         }
+        
         board.rotation = io.github.sceneview.math.Rotation(whiteboardPitch, whiteboardYaw, whiteboardRoll)
         board.position = Position(0f, 0f, whiteboardDistance)
     }
@@ -234,10 +339,10 @@ fun ArActiveScreen(
         }
     }
 
-    // Performs a hit-test at the given screen coordinate and spawns a spray sphere
+    // Free-spray drawing: ARCore hit-test with mid-air fallback.
+    // Whiteboard drawing is handled inline in the onMove handler below (using Session batching).
     val drawPointAt = { x: Float, y: Float ->
         val currentFrame = frame
-        val board = whiteboardNode
         val session = arSession
         if (currentFrame != null) {
             var hitResult = currentFrame
@@ -259,79 +364,33 @@ fun ArActiveScreen(
             }
 
             anchor?.let { anchor ->
-                if (isWhiteboardMode && board != null) {
-                    val tempAnchorNode = AnchorNode(engine = engine, anchor = anchor)
-                    val worldPos = tempAnchorNode.worldPosition
-                    val localPos = (board.worldToLocal * dev.romainguy.kotlin.math.Float4(worldPos, 1f)).xyz
-                    val halfWidth = whiteboardWidth / 2f
-                    val halfHeight = whiteboardHeight / 2f
+                val sphereNode = SphereNode(
+                    engine = engine,
+                    radius = brushSize,
+                    materialInstance = sprayMaterialInstance
+                )
 
-                    if (localPos.x >= -halfWidth && localPos.x <= halfWidth &&
-                        localPos.y >= -halfHeight && localPos.y <= halfHeight) {
-
-                        val sphereNode = SphereNode(
-                            engine = engine,
-                            radius = brushSize,
-                            materialInstance = materialLoader.createColorInstance(sprayColor)
-                        ).apply {
-                            position = io.github.sceneview.math.Position(localPos.x, localPos.y, 0f)
-                        }
-
-                        board.addChildNode(sphereNode)
-
-                        // Add point to current stroke builder
-                        var stroke = currentStrokeBuilder
-                        if (stroke == null) {
-                            stroke = Ink.Stroke.builder()
-                            currentStrokeBuilder = stroke
-                        }
-                        stroke.addPoint(
-                            Ink.Point.create(localPos.x * 1000f, localPos.y * 1000f, System.currentTimeMillis())
-                        )
-
-                        if (appMode != ArAppMode.SOLO) {
-                            val syncNode = ArSyncNode(
-                                type = "sphere",
-                                posX = localPos.x,
-                                posY = localPos.y,
-                                posZ = 0f,
-                                scale = brushSize,
-                                colorHex = "#FF00FF"
-                            )
-                            syncClient?.sendNode(syncNode)
-                        }
-                    }
+                if (appMode == ArAppMode.SOLO) {
+                    val anchorNode = AnchorNode(engine = engine, anchor = anchor)
+                    anchorNode.addChildNode(sphereNode)
+                    childNodes += anchorNode
                 } else {
-                    val sphereNode = SphereNode(
-                        engine = engine,
-                        radius = brushSize,
-                        materialInstance = materialLoader.createColorInstance(sprayColor)
-                    )
+                    val baseNode = sharedBaseNode
+                    if (baseNode != null) {
+                        val tempAnchorNode = AnchorNode(engine = engine, anchor = anchor)
+                        sphereNode.worldPosition = tempAnchorNode.worldPosition
+                        baseNode.addChildNode(sphereNode)
 
-                    if (appMode == ArAppMode.SOLO) {
-                        val anchorNode = AnchorNode(engine = engine, anchor = anchor)
-                        anchorNode.addChildNode(sphereNode)
-                        childNodes += anchorNode
-                    } else {
-                        val baseNode = sharedBaseNode
-                        if (baseNode != null) {
-                            // Position relative to parent base anchor is calculated automatically by setting worldPosition
-                            val tempAnchorNode = AnchorNode(engine = engine, anchor = anchor)
-                            sphereNode.worldPosition = tempAnchorNode.worldPosition
-                            baseNode.addChildNode(sphereNode)
-
-                            // Send coordinate relative to shared anchor to the server
-                            val relativePos = sphereNode.position
-                            val syncNode = ArSyncNode(
-                                type = "sphere",
-                                posX = relativePos.x,
-                                posY = relativePos.y,
-                                posZ = relativePos.z,
-                                scale = brushSize,
-                                colorHex = "#FF00FF"
-                            )
-                            syncClient?.sendNode(syncNode)
-                        }
+                        val relativePos = sphereNode.position
+                        val syncNode = ArSyncNode(
+                            type = "sphere",
+                            posX = relativePos.x,
+                            posY = relativePos.y,
+                            posZ = relativePos.z,
+                            scale = brushSize,
+                            colorHex = "#FF00FF"
+                        )
+                        syncClient?.sendNode(syncNode)
                     }
                 }
             }
@@ -426,11 +485,10 @@ fun ArActiveScreen(
                             syncStatusText = null
                             
                             val board = if (isWhiteboardMode) {
+                                val matInstance = getOrCreateWhiteboardMaterial()
                                 CubeNode(
                                     engine = engine,
-                                    materialInstance = materialLoader.createColorInstance(
-                                        if (isWhiteboardTransparent) Color.Transparent else Color(0xFFF5F5F5)
-                                    )
+                                    materialInstance = matInstance
                                 ).apply {
                                     scale = io.github.sceneview.math.Scale(whiteboardWidth, whiteboardHeight, 0.02f)
                                     lookAt(cameraNode.worldPosition)
@@ -453,84 +511,23 @@ fun ArActiveScreen(
                                 serverUri = uri,
                                 roomId = activeRoomId!!,
                                 onNodeReceived = { syncNode ->
-                                    val nodeRadius = syncNode.scale
-                                    val targetParent = board ?: resolvedNode
-                                    if (syncNode.type == "sphere") {
-                                        val sphereNode = SphereNode(
-                                            engine = engine,
-                                            radius = nodeRadius,
-                                            materialInstance = materialLoader.createColorInstance(sprayColor)
-                                        ).apply {
-                                            position = Position(syncNode.posX, syncNode.posY, syncNode.posZ)
-                                        }
-                                        targetParent.addChildNode(sphereNode)
-                                    } else if (syncNode.type == "duck") {
-                                        val currentModel = duckModel
-                                        if (currentModel != null) {
-                                            val modelInstance = modelLoader.createInstance(currentModel.modelInstance.asset)
-                                            if (modelInstance != null) {
-                                                val modelNode = ModelNode(modelInstance = modelInstance).apply {
-                                                    scale = io.github.sceneview.math.Scale(0.5f)
-                                                    position = Position(syncNode.posX, syncNode.posY, syncNode.posZ)
-                                                }
-                                                targetParent.addChildNode(modelNode)
-                                            }
-                                        }
-                                    } else if (syncNode.type == "avocado") {
-                                        val currentModel = avocadoModel
-                                        if (currentModel != null) {
-                                            val modelInstance = modelLoader.createInstance(currentModel.modelInstance.asset)
-                                            if (modelInstance != null) {
-                                                val modelNode = ModelNode(modelInstance = modelInstance).apply {
-                                                    scale = io.github.sceneview.math.Scale(3.0f)
-                                                    position = Position(syncNode.posX, syncNode.posY, syncNode.posZ)
-                                                }
-                                                targetParent.addChildNode(modelNode)
-                                            }
-                                        }
-                                    } else if (syncNode.type == "fox") {
-                                        val currentModel = foxModel
-                                        if (currentModel != null) {
-                                            val modelInstance = modelLoader.createInstance(currentModel.modelInstance.asset)
-                                            if (modelInstance != null) {
-                                                val modelNode = ModelNode(modelInstance = modelInstance).apply {
-                                                    scale = io.github.sceneview.math.Scale(0.02f)
-                                                    position = Position(syncNode.posX, syncNode.posY, syncNode.posZ)
-                                                }
-                                                targetParent.addChildNode(modelNode)
-                                            }
-                                        }
-                                    } else if (syncNode.type == "lantern") {
-                                        val currentModel = lanternModel
-                                        if (currentModel != null) {
-                                            val modelInstance = modelLoader.createInstance(currentModel.modelInstance.asset)
-                                            if (modelInstance != null) {
-                                                val modelNode = ModelNode(modelInstance = modelInstance).apply {
-                                                    scale = io.github.sceneview.math.Scale(0.5f)
-                                                    position = Position(syncNode.posX, syncNode.posY, syncNode.posZ)
-                                                }
-                                                targetParent.addChildNode(modelNode)
-                                            }
-                                        }
-                                    } else if (syncNode.type == "cube") {
-                                        val cubeNode = CubeNode(
-                                            engine = engine,
-                                            size = io.github.sceneview.math.Size(0.1f),
-                                            materialInstance = materialLoader.createColorInstance(Color.Red)
-                                        ).apply {
-                                            position = Position(syncNode.posX, syncNode.posY, syncNode.posZ)
-                                        }
-                                        targetParent.addChildNode(cubeNode)
-                                    } else if (syncNode.type == "sphere_object") {
-                                        val sphereNode = SphereNode(
-                                            engine = engine,
-                                            radius = 0.05f,
-                                            materialInstance = materialLoader.createColorInstance(Color.Blue)
-                                        ).apply {
-                                            position = Position(syncNode.posX, syncNode.posY, syncNode.posZ)
-                                        }
-                                        targetParent.addChildNode(sphereNode)
-                                    }
+                                    spawnSyncNode(
+                                        engine = engine,
+                                        materialLoader = materialLoader,
+                                        modelLoader = modelLoader,
+                                        syncNode = syncNode,
+                                        parent = board ?: resolvedNode,
+                                        sprayMaterialInstance = sprayMaterialInstance,
+                                        sprayColor = sprayColor,
+                                        duckModel = duckModel,
+                                        avocadoModel = avocadoModel,
+                                        foxModel = foxModel,
+                                        lanternModel = lanternModel,
+                                        whiteboardWidth = whiteboardWidth,
+                                        whiteboardHeight = whiteboardHeight,
+                                        whiteboardPaths = whiteboardPaths,
+                                        onPathsChanged = { whiteboardPaths = it }
+                                    )
                                 },
                                 onRoomCleared = {
                                     if (board != null) {
@@ -580,9 +577,10 @@ fun ArActiveScreen(
                             }
 
                             anchor?.let { anchor ->
+                                val matInstance = getOrCreateWhiteboardMaterial()
                                 val board = CubeNode(
                                     engine = engine,
-                                    materialInstance = materialLoader.createColorInstance(Color(0xFFF5F5F5))
+                                    materialInstance = matInstance
                                 ).apply {
                                     scale = io.github.sceneview.math.Scale(whiteboardWidth, whiteboardHeight, 0.02f)
                                     lookAt(cameraNode.worldPosition)
@@ -617,84 +615,23 @@ fun ArActiveScreen(
                                                     serverUri = uri,
                                                     roomId = anchorId,
                                                     onNodeReceived = { syncNode ->
-                                                        val nodeRadius = syncNode.scale
-                                                        val targetParent = board
-                                                        if (syncNode.type == "sphere") {
-                                                            val sphereNode = SphereNode(
-                                                                engine = engine,
-                                                                radius = nodeRadius,
-                                                                materialInstance = materialLoader.createColorInstance(sprayColor)
-                                                            ).apply {
-                                                                position = Position(syncNode.posX, syncNode.posY, syncNode.posZ)
-                                                            }
-                                                            targetParent.addChildNode(sphereNode)
-                                                        } else if (syncNode.type == "duck") {
-                                                            val currentModel = duckModel
-                                                            if (currentModel != null) {
-                                                                val modelInstance = modelLoader.createInstance(currentModel.modelInstance.asset)
-                                                                if (modelInstance != null) {
-                                                                    val modelNode = ModelNode(modelInstance = modelInstance).apply {
-                                                                        scale = io.github.sceneview.math.Scale(0.5f)
-                                                                        position = Position(syncNode.posX, syncNode.posY, syncNode.posZ)
-                                                                    }
-                                                                    targetParent.addChildNode(modelNode)
-                                                                }
-                                                            }
-                                                        } else if (syncNode.type == "avocado") {
-                                                            val currentModel = avocadoModel
-                                                            if (currentModel != null) {
-                                                                val modelInstance = modelLoader.createInstance(currentModel.modelInstance.asset)
-                                                                if (modelInstance != null) {
-                                                                    val modelNode = ModelNode(modelInstance = modelInstance).apply {
-                                                                        scale = io.github.sceneview.math.Scale(3.0f)
-                                                                        position = Position(syncNode.posX, syncNode.posY, syncNode.posZ)
-                                                                    }
-                                                                    targetParent.addChildNode(modelNode)
-                                                                }
-                                                            }
-                                                        } else if (syncNode.type == "fox") {
-                                                            val currentModel = foxModel
-                                                            if (currentModel != null) {
-                                                                val modelInstance = modelLoader.createInstance(currentModel.modelInstance.asset)
-                                                                if (modelInstance != null) {
-                                                                    val modelNode = ModelNode(modelInstance = modelInstance).apply {
-                                                                        scale = io.github.sceneview.math.Scale(0.02f)
-                                                                        position = Position(syncNode.posX, syncNode.posY, syncNode.posZ)
-                                                                    }
-                                                                    targetParent.addChildNode(modelNode)
-                                                                }
-                                                            }
-                                                        } else if (syncNode.type == "lantern") {
-                                                            val currentModel = lanternModel
-                                                            if (currentModel != null) {
-                                                                val modelInstance = modelLoader.createInstance(currentModel.modelInstance.asset)
-                                                                if (modelInstance != null) {
-                                                                    val modelNode = ModelNode(modelInstance = modelInstance).apply {
-                                                                        scale = io.github.sceneview.math.Scale(0.5f)
-                                                                        position = Position(syncNode.posX, syncNode.posY, syncNode.posZ)
-                                                                    }
-                                                                    targetParent.addChildNode(modelNode)
-                                                                }
-                                                            }
-                                                        } else if (syncNode.type == "cube") {
-                                                            val cubeNode = CubeNode(
-                                                                engine = engine,
-                                                                size = io.github.sceneview.math.Size(0.1f),
-                                                                materialInstance = materialLoader.createColorInstance(Color.Red)
-                                                            ).apply {
-                                                                position = Position(syncNode.posX, syncNode.posY, syncNode.posZ)
-                                                            }
-                                                            targetParent.addChildNode(cubeNode)
-                                                        } else if (syncNode.type == "sphere_object") {
-                                                            val sphereNode = SphereNode(
-                                                                engine = engine,
-                                                                radius = 0.05f,
-                                                                materialInstance = materialLoader.createColorInstance(Color.Blue)
-                                                            ).apply {
-                                                                position = Position(syncNode.posX, syncNode.posY, syncNode.posZ)
-                                                            }
-                                                            targetParent.addChildNode(sphereNode)
-                                                        }
+                                                        spawnSyncNode(
+                                                            engine = engine,
+                                                            materialLoader = materialLoader,
+                                                            modelLoader = modelLoader,
+                                                            syncNode = syncNode,
+                                                            parent = board,
+                                                            sprayMaterialInstance = sprayMaterialInstance,
+                                                            sprayColor = sprayColor,
+                                                            duckModel = duckModel,
+                                                            avocadoModel = avocadoModel,
+                                                            foxModel = foxModel,
+                                                            lanternModel = lanternModel,
+                                                            whiteboardWidth = whiteboardWidth,
+                                                            whiteboardHeight = whiteboardHeight,
+                                                            whiteboardPaths = whiteboardPaths,
+                                                            onPathsChanged = { whiteboardPaths = it }
+                                                        )
                                                     },
                                                     onRoomCleared = {
                                                         board.clearChildNodes()
@@ -722,36 +659,27 @@ fun ArActiveScreen(
                             Toast.makeText(context, "Model not ready", Toast.LENGTH_SHORT).show()
                         } else {
                             val currentFrame = frame
-                            val session = arSession
                             if (currentFrame != null) {
-                                var hitResult = currentFrame
-                                    .hitTest(motionEvent.x, motionEvent.y)
-                                    .firstOrNull { hit ->
-                                        val trackable = hit.trackable
-                                        (trackable is Plane && trackable.trackingState == TrackingState.TRACKING) ||
-                                        hit.isValid(depthPoint = true, point = true, instantPlacementPoint = true)
-                                    }
-                                if (hitResult == null) {
-                                    hitResult = currentFrame.hitTest(motionEvent.x, motionEvent.y).firstOrNull()
-                                }
+                                // Ray-cast onto the whiteboard plane (no ARCore hit-test needed)
+                                val displayMetrics = context.resources.displayMetrics
+                                val worldHit = com.g37.arspray.ar.RayPlaneIntersector.intersect(
+                                    frame = currentFrame,
+                                    screenX = motionEvent.x,
+                                    screenY = motionEvent.y,
+                                    viewWidth = displayMetrics.widthPixels,
+                                    viewHeight = displayMetrics.heightPixels,
+                                    boardWorldPosition = board.worldPosition,
+                                    boardWorldTransform = board.worldTransform
+                                )
 
-                                var anchor = hitResult?.createAnchorOrNull()
-                                if (anchor == null && session != null) {
-                                    val cameraPose = currentFrame.camera.displayOrientedPose
-                                    val fallbackPose = cameraPose.compose(com.google.ar.core.Pose.makeTranslation(0f, 0f, -1.0f))
-                                    anchor = session.createAnchor(fallbackPose)
-                                }
-
-                                anchor?.let { anchor ->
-                                    val tempAnchorNode = AnchorNode(engine = engine, anchor = anchor)
-                                    val worldPos = tempAnchorNode.worldPosition
-                                    val localPos = (board.worldToLocal * dev.romainguy.kotlin.math.Float4(worldPos, 1f)).xyz
+                                if (worldHit != null) {
+                                    val localPos = (board.worldToLocal * dev.romainguy.kotlin.math.Float4(worldHit, 1f)).xyz
                                     val halfWidth = whiteboardWidth / 2f
                                     val halfHeight = whiteboardHeight / 2f
 
                                     if (localPos.x >= -halfWidth && localPos.x <= halfWidth &&
-                                        localPos.y >= -halfHeight && localPos.y <= halfHeight) {
-
+                                        localPos.y >= -halfHeight && localPos.y <= halfHeight
+                                    ) {
                                         val spawnedNode = when (selectedObjectType) {
                                             ArObjectType.DUCK -> {
                                                 val currentModel = duckModel
@@ -868,59 +796,23 @@ fun ArActiveScreen(
                                             serverUri = uri,
                                             roomId = anchorId,
                                             onNodeReceived = { syncNode ->
-                                                val nodeRadius = syncNode.scale
-                                                if (syncNode.type == "sphere") {
-                                                    val sphereNode = SphereNode(
-                                                        engine = engine,
-                                                        radius = nodeRadius,
-                                                        materialInstance = materialLoader.createColorInstance(sprayColor)
-                                                    ).apply {
-                                                        position = Position(syncNode.posX, syncNode.posY, syncNode.posZ)
-                                                    }
-                                                    sharedBaseNode?.addChildNode(sphereNode)
-                                                } else if (syncNode.type == "duck") {
-                                                    val currentModel = duckModel
-                                                    if (currentModel != null) {
-                                                        val modelInstance = modelLoader.createInstance(currentModel.modelInstance.asset)
-                                                        if (modelInstance != null) {
-                                                            val modelNode = ModelNode(modelInstance = modelInstance).apply {
-                                                                scale = io.github.sceneview.math.Scale(0.5f)
-                                                                position = Position(syncNode.posX, syncNode.posY, syncNode.posZ)
-                                                            }
-                                                            sharedBaseNode?.addChildNode(modelNode)
-                                                        }
-                                                    }
-                                                } else if (syncNode.type == "avocado") {
-                                                    val currentModel = avocadoModel
-                                                    if (currentModel != null) {
-                                                        val modelInstance = modelLoader.createInstance(currentModel.modelInstance.asset)
-                                                        if (modelInstance != null) {
-                                                            val modelNode = ModelNode(modelInstance = modelInstance).apply {
-                                                                scale = io.github.sceneview.math.Scale(3.0f)
-                                                                position = Position(syncNode.posX, syncNode.posY, syncNode.posZ)
-                                                            }
-                                                            sharedBaseNode?.addChildNode(modelNode)
-                                                        }
-                                                    }
-                                                } else if (syncNode.type == "cube") {
-                                                    val cubeNode = CubeNode(
-                                                        engine = engine,
-                                                        size = io.github.sceneview.math.Size(0.1f),
-                                                        materialInstance = materialLoader.createColorInstance(Color.Red)
-                                                    ).apply {
-                                                        position = Position(syncNode.posX, syncNode.posY, syncNode.posZ)
-                                                    }
-                                                    sharedBaseNode?.addChildNode(cubeNode)
-                                                } else if (syncNode.type == "sphere_object") {
-                                                    val sphereNode = SphereNode(
-                                                        engine = engine,
-                                                        radius = 0.05f,
-                                                        materialInstance = materialLoader.createColorInstance(Color.Blue)
-                                                    ).apply {
-                                                        position = Position(syncNode.posX, syncNode.posY, syncNode.posZ)
-                                                    }
-                                                    sharedBaseNode?.addChildNode(sphereNode)
-                                                }
+                                                spawnSyncNode(
+                                                    engine = engine,
+                                                    materialLoader = materialLoader,
+                                                    modelLoader = modelLoader,
+                                                    syncNode = syncNode,
+                                                    parent = sharedBaseNode ?: cloudAnchor,
+                                                    sprayMaterialInstance = sprayMaterialInstance,
+                                                    sprayColor = sprayColor,
+                                                    duckModel = duckModel,
+                                                    avocadoModel = avocadoModel,
+                                                    foxModel = foxModel,
+                                                    lanternModel = lanternModel,
+                                                    whiteboardWidth = whiteboardWidth,
+                                                    whiteboardHeight = whiteboardHeight,
+                                                    whiteboardPaths = whiteboardPaths,
+                                                    onPathsChanged = { whiteboardPaths = it }
+                                                )
                                             },
                                             onRoomCleared = {
                                                 sharedBaseNode?.clearChildNodes()
@@ -1059,23 +951,19 @@ fun ArActiveScreen(
                         val endX = motionEvent.x
                         val endY = motionEvent.y
 
-                        if (isWhiteboardMode && whiteboardNode != null) {
-                            if (timeDelta > 150L || currentStrokeBuilder == null) {
-                                currentStrokeBuilder?.let {
-                                    inkBuilder.addStroke(it.build())
-                                }
-                                currentStrokeBuilder = Ink.Stroke.builder()
-                            }
+                        if (isWhiteboardMode) {
+                            // In whiteboard mode, drawing is handled by the 2D canvas editor overlay
+                        } else {
+                            // ── Free-spray mode (no whiteboard) ──
+                            interpolateAndDraw(
+                                startX = lastTouchX,
+                                startY = lastTouchY,
+                                endX = endX,
+                                endY = endY,
+                                timeDelta = timeDelta,
+                                onDrawPoint = drawPointAt
+                            )
                         }
-
-                        interpolateAndDraw(
-                            startX = lastTouchX,
-                            startY = lastTouchY,
-                            endX = endX,
-                            endY = endY,
-                            timeDelta = timeDelta,
-                            onDrawPoint = drawPointAt
-                        )
 
                         lastTouchX = endX
                         lastTouchY = endY
@@ -1178,6 +1066,7 @@ fun ArActiveScreen(
                         syncClient?.sendClear()
                     }
                     inkBuilder = Ink.builder()
+                    whiteboardPaths = emptyList()
                 },
                 onSuccess = { centerX, centerY ->
                     val currentModel = duckModel
@@ -1225,6 +1114,7 @@ fun ArActiveScreen(
                             whiteboardNode?.clearChildNodes()
                             inkBuilder = Ink.builder()
                             currentStrokeBuilder = null
+                            whiteboardPaths = emptyList()
                         } else {
                             childNodes.clear()
                         }
@@ -1312,6 +1202,52 @@ fun ArActiveScreen(
                 }
             }
         }
+
+        // Floating "Edit Board" button when in Whiteboard Mode and a board is placed
+        if (isWhiteboardMode && whiteboardNode != null && !isEditCanvasOpen) {
+            Button(
+                onClick = { isEditCanvasOpen = true },
+                colors = ButtonDefaults.buttonColors(containerColor = sprayColor),
+                modifier = Modifier
+                    .align(Alignment.CenterEnd)
+                    .padding(end = 24.dp)
+            ) {
+                Text("Edit Board", color = Color.White)
+            }
+        }
+
+        // Full-screen Whiteboard Drawing Canvas Editor Overlay
+        WhiteboardDrawingOverlay(
+            isEditCanvasOpen = isEditCanvasOpen,
+            isWhiteboardTransparent = isWhiteboardTransparent,
+            whiteboardWidth = whiteboardWidth,
+            whiteboardHeight = whiteboardHeight,
+            sprayColor = sprayColor,
+            appMode = appMode,
+            syncClient = syncClient,
+            whiteboardPaths = whiteboardPaths,
+            onPathsChanged = { whiteboardPaths = it },
+            onClearAll = {
+                whiteboardPaths = emptyList()
+                val bmp = whiteboardBitmap
+                if (bmp != null) {
+                    val canvas = android.graphics.Canvas(bmp)
+                    if (isWhiteboardTransparent) {
+                        canvas.drawColor(android.graphics.Color.TRANSPARENT, android.graphics.PorterDuff.Mode.CLEAR)
+                    } else {
+                        canvas.drawColor(android.graphics.Color.WHITE)
+                    }
+                }
+                val tex = whiteboardTexture
+                if (bmp != null && tex != null) {
+                    updateTextureFromBitmap(bmp, tex)
+                }
+                if (appMode != ArAppMode.SOLO) {
+                    syncClient?.sendClear()
+                }
+            },
+            onClose = { isEditCanvasOpen = false }
+        )
 
         // Version Indicator Overlay
         Text(
