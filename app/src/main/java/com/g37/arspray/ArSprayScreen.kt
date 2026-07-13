@@ -246,7 +246,7 @@ fun ArActiveScreen(
                 whiteboardTexture = tex
                 updateTextureFromBitmap(bmp, tex)
             }
-            materialLoader.createTextureInstance(tex)
+            materialLoader.createTextureInstance(tex, isOpaque = !isWhiteboardTransparent)
         }
     }
 
@@ -279,6 +279,7 @@ fun ArActiveScreen(
     ) {
         val board = whiteboardNode ?: return@LaunchedEffect
         board.scale = io.github.sceneview.math.Scale(whiteboardWidth, whiteboardHeight, 0.02f)
+        board.materialInstance = getOrCreateWhiteboardMaterial()
         
         val bmp = whiteboardBitmap
         val tex = whiteboardTexture
