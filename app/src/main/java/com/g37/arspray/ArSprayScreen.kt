@@ -52,7 +52,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
-import com.g37.arspray.ar.ArSyncClient
+import com.g37.arspray.ar.ArFirebaseSync
 import com.g37.arspray.ar.ArSyncNode
 import com.g37.arspray.ar.configureArSession
 import com.g37.arspray.ar.generateQrCode
@@ -106,14 +106,19 @@ fun ArSprayScreen() {
     when (appMode) {
         ArAppMode.LOBBY -> LobbyScreen(
             onSoloMode = { appMode = ArAppMode.SOLO },
-            onHostMode = { appMode = ArAppMode.HOST_LOBBY },
+            onHostMode = { 
+                activeRoomId = (1..6).map { ('A'..'Z').random() }.joinToString("")
+                appMode = ArAppMode.HOST_LOBBY 
+            },
             onJoinMode = { appMode = ArAppMode.JOIN_LOBBY }
         )
         ArAppMode.HOST_LOBBY -> HostLobbyScreen(
-            serverIp = serverIp,
-            onServerIpChange = { serverIp = it },
+            roomId = activeRoomId ?: "",
             onStartHosting = { appMode = ArAppMode.HOST_ACTIVE },
-            onBack = { appMode = ArAppMode.LOBBY }
+            onBack = { 
+                activeRoomId = null
+                appMode = ArAppMode.LOBBY 
+            }
         )
         ArAppMode.JOIN_LOBBY -> JoinLobbyScreen(
             onScanQr = { appMode = ArAppMode.JOIN_SCANNING },
@@ -121,15 +126,9 @@ fun ArSprayScreen() {
         )
         ArAppMode.JOIN_SCANNING -> CameraScanner(
             onBarcodeScanned = { barcodeText ->
-                try {
-                    val parts = barcodeText.split("|")
-                    if (parts.size == 2) {
-                        serverIp = parts[0]
-                        activeRoomId = parts[1]
-                        appMode = ArAppMode.JOIN_ACTIVE
-                    }
-                } catch (e: Exception) {
-                    e.printStackTrace()
+                if (barcodeText.isNotEmpty()) {
+                    activeRoomId = barcodeText.trim()
+                    appMode = ArAppMode.JOIN_ACTIVE
                 }
             }
         )
@@ -331,12 +330,161 @@ fun ArActiveScreen(
     var connectionState by remember { mutableStateOf(false) }
     var syncStatusText by remember { mutableStateOf<String?>(null) }
     var showQrDialog by remember { mutableStateOf(false) }
-    var syncClient by remember { mutableStateOf<ArSyncClient?>(null) }
+    var firebaseSync by remember { mutableStateOf<ArFirebaseSync?>(null) }
 
-    // Safely disconnect WebSocket when composable is destroyed
-    DisposableEffect(syncClient) {
+    // Safely stop Firestore listener when composable is destroyed
+    DisposableEffect(firebaseSync) {
         onDispose {
-            syncClient?.disconnect()
+            firebaseSync?.stopListener()
+        }
+    }
+
+    // Host room initialization and listener setup
+    DisposableEffect(activeRoomId) {
+        val id = activeRoomId
+        var sync: ArFirebaseSync? = null
+        if (appMode == ArAppMode.HOST_ACTIVE && id != null) {
+            syncStatusText = "Initializing Shared Room..."
+            val activeSync = ArFirebaseSync(id)
+            sync = activeSync
+            activeSync.initializeRoom { success ->
+                if (success) {
+                    syncStatusText = "Shared Room Initialized."
+                    activeSync.startListener(
+                        onNodeReceived = { syncNode ->
+                            val parentNode = whiteboardNode ?: sharedBaseNode
+                            if (parentNode != null) {
+                                spawnSyncNode(
+                                    engine = engine,
+                                    materialLoader = materialLoader,
+                                    modelLoader = modelLoader,
+                                    syncNode = syncNode,
+                                    parent = parentNode,
+                                    sprayMaterialInstance = sprayMaterialInstance,
+                                    sprayColor = sprayColor,
+                                    duckModel = duckModel,
+                                    avocadoModel = avocadoModel,
+                                    foxModel = foxModel,
+                                    lanternModel = lanternModel,
+                                    whiteboardWidth = whiteboardWidth,
+                                    whiteboardHeight = whiteboardHeight,
+                                    whiteboardPaths = whiteboardPaths,
+                                    onPathsChanged = { whiteboardPaths = it }
+                                )
+                            }
+                        },
+                        onPathsChanged = { paths ->
+                            whiteboardPaths = paths
+                        },
+                        onRoomCleared = {
+                            whiteboardNode?.clearChildNodes()
+                            sharedBaseNode?.clearChildNodes()
+                            inkBuilder = Ink.builder()
+                            currentStrokeBuilder = null
+                        },
+                        onConnectionStateChanged = { connected ->
+                            connectionState = connected
+                        },
+                        onAnchorIdReceived = {}
+                    )
+                    firebaseSync = activeSync
+                } else {
+                    syncStatusText = "Failed to initialize Firebase Room."
+                }
+            }
+        }
+        onDispose {
+            sync?.stopListener()
+        }
+    }
+
+    // Guest listener setup (resolves anchor dynamically once host publishes it)
+    DisposableEffect(activeRoomId, arSession) {
+        val id = activeRoomId
+        val sess = arSession
+        var sync: ArFirebaseSync? = null
+        if (appMode == ArAppMode.JOIN_ACTIVE && id != null) {
+            syncStatusText = "Connecting to Shared Room..."
+            val activeSync = ArFirebaseSync(id)
+            sync = activeSync
+            activeSync.startListener(
+                onNodeReceived = { syncNode ->
+                    val parentNode = whiteboardNode ?: sharedBaseNode
+                    if (parentNode != null) {
+                        spawnSyncNode(
+                            engine = engine,
+                            materialLoader = materialLoader,
+                            modelLoader = modelLoader,
+                            syncNode = syncNode,
+                            parent = parentNode,
+                            sprayMaterialInstance = sprayMaterialInstance,
+                            sprayColor = sprayColor,
+                            duckModel = duckModel,
+                            avocadoModel = avocadoModel,
+                            foxModel = foxModel,
+                            lanternModel = lanternModel,
+                            whiteboardWidth = whiteboardWidth,
+                            whiteboardHeight = whiteboardHeight,
+                            whiteboardPaths = whiteboardPaths,
+                            onPathsChanged = { whiteboardPaths = it }
+                        )
+                    }
+                },
+                onPathsChanged = { paths ->
+                    whiteboardPaths = paths
+                },
+                onRoomCleared = {
+                    whiteboardNode?.clearChildNodes()
+                    sharedBaseNode?.clearChildNodes()
+                    inkBuilder = Ink.builder()
+                    currentStrokeBuilder = null
+                },
+                onConnectionStateChanged = { connected ->
+                    connectionState = connected
+                },
+                onAnchorIdReceived = { cloudAnchorId ->
+                    val s = arSession
+                    if (s != null && sharedBaseNode == null && !isResolvingStarted) {
+                        isResolvingStarted = true
+                        syncStatusText = "Resolving Shared Anchor..."
+                        CloudAnchorNode.resolve(engine, s, cloudAnchorId) { state, resolvedNode ->
+                            if (state == Anchor.CloudAnchorState.SUCCESS && resolvedNode != null) {
+                                sharedBaseNode = resolvedNode
+                                childNodes += resolvedNode
+                                syncStatusText = null
+                                
+                                val board = if (isWhiteboardMode) {
+                                    val matInstance = getOrCreateWhiteboardMaterial()
+                                    CubeNode(
+                                        engine = engine,
+                                        materialInstance = matInstance
+                                    ).apply {
+                                        scale = io.github.sceneview.math.Scale(whiteboardWidth, whiteboardHeight, 0.02f)
+                                        lookAt(cameraNode.worldPosition)
+                                        val rot = rotation
+                                        whiteboardYaw = rot.y
+                                        whiteboardPitch = rot.x
+                                        whiteboardRoll = rot.z
+                                        position = Position(0f, 0f, whiteboardDistance)
+                                    }
+                                } else null
+                                
+                                if (board != null) {
+                                    whiteboardNode = board
+                                    resolvedNode.addChildNode(board)
+                                }
+                            } else if (state.isError) {
+                                syncStatusText = "Resolving failed: $state"
+                                isResolvingStarted = false
+                            }
+                        }
+                    }
+                }
+            )
+            firebaseSync = activeSync
+        }
+        onDispose {
+            sync?.stopListener()
         }
     }
 
@@ -391,7 +539,7 @@ fun ArActiveScreen(
                             scale = brushSize,
                             colorHex = "#FF00FF"
                         )
-                        syncClient?.sendNode(syncNode)
+                        firebaseSync?.sendNode(syncNode)
                     }
                 }
             }
@@ -473,84 +621,6 @@ fun ArActiveScreen(
             onSessionUpdated = { session, updatedFrame ->
                 frame = updatedFrame
                 arSession = session
-
-                // Auto-resolve cloud anchor once guest session starts
-                if (appMode == ArAppMode.JOIN_ACTIVE && sharedBaseNode == null && !isResolvingStarted && activeRoomId != null) {
-                    isResolvingStarted = true
-                    syncStatusText = "Resolving Shared Anchor..."
-                    
-                    CloudAnchorNode.resolve(engine, session, activeRoomId!!) { state, resolvedNode ->
-                        if (state == Anchor.CloudAnchorState.SUCCESS && resolvedNode != null) {
-                            sharedBaseNode = resolvedNode
-                            childNodes += resolvedNode
-                            syncStatusText = null
-                            
-                            val board = if (isWhiteboardMode) {
-                                val matInstance = getOrCreateWhiteboardMaterial()
-                                CubeNode(
-                                    engine = engine,
-                                    materialInstance = matInstance
-                                ).apply {
-                                    scale = io.github.sceneview.math.Scale(whiteboardWidth, whiteboardHeight, 0.02f)
-                                    lookAt(cameraNode.worldPosition)
-                                    val rot = rotation
-                                    whiteboardYaw = rot.y
-                                    whiteboardPitch = rot.x
-                                    whiteboardRoll = rot.z
-                                    position = Position(0f, 0f, whiteboardDistance)
-                                }
-                            } else null
-                            
-                            if (board != null) {
-                                whiteboardNode = board
-                                resolvedNode.addChildNode(board)
-                            }
-                            
-                            // Initialize guest socket client
-                            val uri = URI("ws://$serverIp:8080")
-                            val client = ArSyncClient(
-                                serverUri = uri,
-                                roomId = activeRoomId!!,
-                                onNodeReceived = { syncNode ->
-                                    spawnSyncNode(
-                                        engine = engine,
-                                        materialLoader = materialLoader,
-                                        modelLoader = modelLoader,
-                                        syncNode = syncNode,
-                                        parent = board ?: resolvedNode,
-                                        sprayMaterialInstance = sprayMaterialInstance,
-                                        sprayColor = sprayColor,
-                                        duckModel = duckModel,
-                                        avocadoModel = avocadoModel,
-                                        foxModel = foxModel,
-                                        lanternModel = lanternModel,
-                                        whiteboardWidth = whiteboardWidth,
-                                        whiteboardHeight = whiteboardHeight,
-                                        whiteboardPaths = whiteboardPaths,
-                                        onPathsChanged = { whiteboardPaths = it }
-                                    )
-                                },
-                                onRoomCleared = {
-                                    if (board != null) {
-                                        board.clearChildNodes()
-                                    } else {
-                                        resolvedNode.clearChildNodes()
-                                    }
-                                    inkBuilder = Ink.builder()
-                                    currentStrokeBuilder = null
-                                },
-                                onConnectionStateChanged = { connected ->
-                                    connectionState = connected
-                                }
-                            )
-                            syncClient = client
-                            client.connect()
-                        } else if (state.isError) {
-                            syncStatusText = "Resolving failed: $state"
-                            isResolvingStarted = false
-                        }
-                    }
-                }
             },
             onGestureListener = rememberOnGestureListener(
                 onSingleTapConfirmed = { motionEvent, tappedNode ->
@@ -606,45 +676,9 @@ fun ArActiveScreen(
                                         syncStatusText = "Hosting Shared Anchor with Whiteboard..."
                                         cloudAnchor.host(session) { anchorId, state ->
                                             if (state == Anchor.CloudAnchorState.SUCCESS && anchorId != null) {
-                                                activeRoomId = anchorId
                                                 sharedBaseNode = cloudAnchor
                                                 syncStatusText = null
-
-                                                // Initialize host socket client
-                                                val uri = URI("ws://$serverIp:8080")
-                                                val client = ArSyncClient(
-                                                    serverUri = uri,
-                                                    roomId = anchorId,
-                                                    onNodeReceived = { syncNode ->
-                                                        spawnSyncNode(
-                                                            engine = engine,
-                                                            materialLoader = materialLoader,
-                                                            modelLoader = modelLoader,
-                                                            syncNode = syncNode,
-                                                            parent = board,
-                                                            sprayMaterialInstance = sprayMaterialInstance,
-                                                            sprayColor = sprayColor,
-                                                            duckModel = duckModel,
-                                                            avocadoModel = avocadoModel,
-                                                            foxModel = foxModel,
-                                                            lanternModel = lanternModel,
-                                                            whiteboardWidth = whiteboardWidth,
-                                                            whiteboardHeight = whiteboardHeight,
-                                                            whiteboardPaths = whiteboardPaths,
-                                                            onPathsChanged = { whiteboardPaths = it }
-                                                        )
-                                                    },
-                                                    onRoomCleared = {
-                                                        board.clearChildNodes()
-                                                        inkBuilder = Ink.builder()
-                                                        currentStrokeBuilder = null
-                                                    },
-                                                    onConnectionStateChanged = { connected ->
-                                                        connectionState = connected
-                                                    }
-                                                )
-                                                syncClient = client
-                                                client.connect()
+                                                firebaseSync?.updateAnchorId(anchorId)
                                             } else {
                                                 syncStatusText = "Hosting failed: $state"
                                             }
@@ -761,7 +795,7 @@ fun ArActiveScreen(
                                                     scale = 0.5f,
                                                     colorHex = ""
                                                 )
-                                                syncClient?.sendNode(syncNode)
+                                                firebaseSync?.sendNode(syncNode)
                                             }
                                         }
                                     }
@@ -786,44 +820,11 @@ fun ArActiveScreen(
                                 syncStatusText = "Hosting Shared Anchor..."
 
                                 cloudAnchor.host(session) { anchorId, state ->
-                                    if (state == Anchor.CloudAnchorState.SUCCESS && anchorId != null) {
-                                        activeRoomId = anchorId
-                                        sharedBaseNode = cloudAnchor
-                                        syncStatusText = null
-
-                                        // Initialize host socket client
-                                        val uri = URI("ws://$serverIp:8080")
-                                        val client = ArSyncClient(
-                                            serverUri = uri,
-                                            roomId = anchorId,
-                                            onNodeReceived = { syncNode ->
-                                                spawnSyncNode(
-                                                    engine = engine,
-                                                    materialLoader = materialLoader,
-                                                    modelLoader = modelLoader,
-                                                    syncNode = syncNode,
-                                                    parent = sharedBaseNode ?: cloudAnchor,
-                                                    sprayMaterialInstance = sprayMaterialInstance,
-                                                    sprayColor = sprayColor,
-                                                    duckModel = duckModel,
-                                                    avocadoModel = avocadoModel,
-                                                    foxModel = foxModel,
-                                                    lanternModel = lanternModel,
-                                                    whiteboardWidth = whiteboardWidth,
-                                                    whiteboardHeight = whiteboardHeight,
-                                                    whiteboardPaths = whiteboardPaths,
-                                                    onPathsChanged = { whiteboardPaths = it }
-                                                )
-                                            },
-                                            onRoomCleared = {
-                                                sharedBaseNode?.clearChildNodes()
-                                            },
-                                            onConnectionStateChanged = { connected ->
-                                                connectionState = connected
-                                            }
-                                        )
-                                        syncClient = client
-                                        client.connect()
+                                     if (state == Anchor.CloudAnchorState.SUCCESS && anchorId != null) {
+                                         sharedBaseNode = cloudAnchor
+                                         syncStatusText = null
+                                         firebaseSync?.updateAnchorId(anchorId)
+                                     
                                     } else {
                                         syncStatusText = "Hosting failed: $state"
                                     }
@@ -934,7 +935,7 @@ fun ArActiveScreen(
                                                     scale = 0.5f,
                                                     colorHex = ""
                                                 )
-                                                syncClient?.sendNode(syncNode)
+                                                firebaseSync?.sendNode(syncNode)
                                             }
                                         }
                                     }
@@ -1064,7 +1065,7 @@ fun ArActiveScreen(
                     if (appMode == ArAppMode.SOLO) {
                         whiteboardNode?.clearChildNodes()
                     } else {
-                        syncClient?.sendClear()
+                        firebaseSync?.sendClear()
                     }
                     inkBuilder = Ink.builder()
                     whiteboardPaths = emptyList()
@@ -1090,7 +1091,7 @@ fun ArActiveScreen(
                                     scale = 0.5f,
                                     colorHex = ""
                                 )
-                                syncClient?.sendNode(syncNode)
+                                firebaseSync?.sendNode(syncNode)
                             }
                         }
                     }
@@ -1120,7 +1121,7 @@ fun ArActiveScreen(
                             childNodes.clear()
                         }
                     } else {
-                        syncClient?.sendClear()
+                        firebaseSync?.sendClear()
                     }
                 },
                 isWhiteboardMode = isWhiteboardMode,
@@ -1225,7 +1226,7 @@ fun ArActiveScreen(
             whiteboardHeight = whiteboardHeight,
             sprayColor = sprayColor,
             appMode = appMode,
-            syncClient = syncClient,
+            firebaseSync = firebaseSync,
             whiteboardPaths = whiteboardPaths,
             onPathsChanged = { whiteboardPaths = it },
             onClearAll = {
@@ -1244,7 +1245,7 @@ fun ArActiveScreen(
                     updateTextureFromBitmap(bmp, tex)
                 }
                 if (appMode != ArAppMode.SOLO) {
-                    syncClient?.sendClear()
+                    firebaseSync?.sendClear()
                 }
             },
             onClose = { isEditCanvasOpen = false }

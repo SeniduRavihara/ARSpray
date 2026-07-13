@@ -1,6 +1,7 @@
 // com/g37/arspray/ui/LobbyScreens.kt
 package com.g37.arspray.ui
 
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -10,25 +11,24 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.g37.arspray.ar.generateQrCode
 
 private val GradientBackground = Brush.verticalGradient(
     colors = listOf(
@@ -115,11 +115,14 @@ fun LobbyScreen(
 
 @Composable
 fun HostLobbyScreen(
-    serverIp: String,
-    onServerIpChange: (String) -> Unit,
+    roomId: String,
     onStartHosting: () -> Unit,
     onBack: () -> Unit
 ) {
+    val qrBitmap = remember(roomId) {
+        generateQrCode(roomId, 512)
+    }
+
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -137,7 +140,7 @@ fun HostLobbyScreen(
                 fontWeight = FontWeight.Bold,
                 color = Color.White
             )
-            Spacer(modifier = Modifier.height(32.dp))
+            Spacer(modifier = Modifier.height(24.dp))
 
             Card(
                 colors = CardDefaults.cardColors(containerColor = CardBgColor),
@@ -150,25 +153,27 @@ fun HostLobbyScreen(
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
                     Text(
-                        text = "Enter WebSocket Server IP",
+                        text = "Scan to Join this Session",
                         fontSize = 16.sp,
                         color = Color.White.copy(alpha = 0.8f)
                     )
 
-                    OutlinedTextField(
-                        value = serverIp,
-                        onValueChange = onServerIpChange,
-                        singleLine = true,
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedTextColor = Color.White,
-                            unfocusedTextColor = Color.White,
-                            focusedBorderColor = PrimaryAccent,
-                            unfocusedBorderColor = Color.White.copy(alpha = 0.2f),
-                            focusedLabelColor = PrimaryAccent,
-                            unfocusedLabelColor = Color.White.copy(alpha = 0.6f)
-                        ),
-                        modifier = Modifier.fillMaxWidth()
+                    if (qrBitmap != null) {
+                        Image(
+                            bitmap = qrBitmap.asImageBitmap(),
+                            contentDescription = "Session QR Code",
+                            modifier = Modifier
+                                .size(200.dp)
+                                .background(Color.White, RoundedCornerShape(8.dp))
+                                .padding(8.dp)
+                        )
+                    }
+
+                    Text(
+                        text = "Room ID: $roomId",
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = PrimaryAccent
                     )
 
                     Spacer(modifier = Modifier.height(8.dp))
@@ -260,8 +265,8 @@ private fun LobbyButton(
         shape = RoundedCornerShape(12.dp),
         modifier = Modifier
             .fillMaxWidth()
-            .height(56.dp)
+            .height(48.dp)
     ) {
-        Text(text, fontSize = 16.sp, fontWeight = FontWeight.Medium)
+        Text(text = text, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
     }
 }

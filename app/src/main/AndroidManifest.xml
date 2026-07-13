@@ -20,7 +20,7 @@
             tools:replace="android:value" />
         <meta-data
             android:name="com.google.android.ar.API_KEY"
-            android:value="PLACEHOLDER_API_KEY" />
+            android:value="AIzaSyDAp_UaaV2H3E-Mb95feP4LOPTetQvUNrw" />
         <activity
             android:name=".MainActivity"
             android:exported="true"

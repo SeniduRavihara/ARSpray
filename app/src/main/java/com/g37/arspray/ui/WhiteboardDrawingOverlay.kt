@@ -19,8 +19,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.g37.arspray.model.ArAppMode
 import com.g37.arspray.model.DrawingStroke
-import com.g37.arspray.ar.ArSyncClient
-import com.g37.arspray.ar.ArSyncNode
+import com.g37.arspray.ar.ArFirebaseSync
 
 @Composable
 fun WhiteboardDrawingOverlay(
@@ -30,7 +29,7 @@ fun WhiteboardDrawingOverlay(
     whiteboardHeight: Float,
     sprayColor: Color,
     appMode: ArAppMode,
-    syncClient: ArSyncClient?,
+    firebaseSync: ArFirebaseSync?,
     whiteboardPaths: List<DrawingStroke>,
     onPathsChanged: (List<DrawingStroke>) -> Unit,
     onClearAll: () -> Unit,
@@ -56,7 +55,6 @@ fun WhiteboardDrawingOverlay(
             )
     ) {
         Column(modifier = Modifier.fillMaxSize()) {
-            // Header Bar Controls
             // Header Bar Controls (Top Bar: Title + Cancel + Save & Exit)
             Row(
                 modifier = Modifier
@@ -72,43 +70,8 @@ fun WhiteboardDrawingOverlay(
                 Button(
                     onClick = {
                         if (appMode != ArAppMode.SOLO) {
-                            syncClient?.sendClear()
-                            // Re-sync the original paths to all synchronized clients
-                            whiteboardPaths.forEach { stroke ->
-                                if (stroke.points.isNotEmpty()) {
-                                    val first = stroke.points.first()
-                                    val halfW = whiteboardWidth / 2f
-                                    val halfH = whiteboardHeight / 2f
-                                    val lx = (first.x / 1024f) * whiteboardWidth - halfW
-                                    val ly = halfH - (first.y / 1024f) * whiteboardHeight
-                                    val hex = String.format("#%06X", 0xFFFFFF and stroke.color.toArgb())
-                                    syncClient?.sendNode(
-                                        ArSyncNode(
-                                            type = "line",
-                                            posX = lx,
-                                            posY = ly,
-                                            posZ = if (stroke.isEraser) -1f else 1f,
-                                            scale = stroke.width,
-                                            colorHex = hex
-                                        )
-                                    )
-                                    for (i in 1 until stroke.points.size) {
-                                        val pt = stroke.points[i]
-                                        val nlx = (pt.x / 1024f) * whiteboardWidth - halfW
-                                        val nly = halfH - (pt.y / 1024f) * whiteboardHeight
-                                        syncClient?.sendNode(
-                                            ArSyncNode(
-                                                type = "line",
-                                                posX = nlx,
-                                                posY = nly,
-                                                posZ = if (stroke.isEraser) -2f else 0f,
-                                                scale = stroke.width,
-                                                colorHex = hex
-                                            )
-                                        )
-                                    }
-                                }
-                            }
+                            // Roll back Firebase paths to the original pre-session state
+                            firebaseSync?.sendWhiteboardPaths(whiteboardPaths)
                         }
                         onClose()
                     },
@@ -185,6 +148,9 @@ fun WhiteboardDrawingOverlay(
                 Button(
                     onClick = {
                         localPaths = emptyList()
+                        if (appMode != ArAppMode.SOLO) {
+                            firebaseSync?.sendWhiteboardPaths(emptyList())
+                        }
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = Color.DarkGray),
                     contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
@@ -235,24 +201,6 @@ fun WhiteboardDrawingOverlay(
                             )
                             localPaths = localPaths + stroke
 
-                            if (appMode != ArAppMode.SOLO) {
-                                val halfW = whiteboardWidth / 2f
-                                val halfH = whiteboardHeight / 2f
-                                val lx = (px / 1024f) * whiteboardWidth - halfW
-                                val ly = halfH - (py / 1024f) * whiteboardHeight
-                                val hex = String.format("#%06X", 0xFFFFFF and currentBrushColor.toArgb())
-                                syncClient?.sendNode(
-                                    ArSyncNode(
-                                        type = "line",
-                                        posX = lx,
-                                        posY = ly,
-                                        posZ = if (isEraserActive) -1f else 1f,
-                                        scale = currentBrushWidth,
-                                        colorHex = hex
-                                    )
-                                )
-                            }
-
                             // Wait for subsequent touch move events
                             while (true) {
                                 val event = awaitPointerEvent()
@@ -274,25 +222,12 @@ fun WhiteboardDrawingOverlay(
                                         val updated = last.copy(points = last.points + dragPt)
                                         localPaths = localPaths.dropLast(1) + updated
                                     }
-
-                                    if (appMode != ArAppMode.SOLO) {
-                                        val halfW = whiteboardWidth / 2f
-                                        val halfH = whiteboardHeight / 2f
-                                        val lx = (npx / 1024f) * whiteboardWidth - halfW
-                                        val ly = halfH - (npy / 1024f) * whiteboardHeight
-                                        val hex = String.format("#%06X", 0xFFFFFF and currentBrushColor.toArgb())
-                                        syncClient?.sendNode(
-                                            ArSyncNode(
-                                                type = "line",
-                                                posX = lx,
-                                                posY = ly,
-                                                posZ = if (isEraserActive) -2f else 0f,
-                                                scale = currentBrushWidth,
-                                                colorHex = hex
-                                            )
-                                        )
-                                    }
                                 }
+                            }
+
+                            // Touch released (Gesture finished) -> Upload paths to Firestore in one single update
+                            if (appMode != ArAppMode.SOLO) {
+                                firebaseSync?.sendWhiteboardPaths(localPaths)
                             }
                         }
                     }
