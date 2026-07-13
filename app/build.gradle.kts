@@ -62,4 +62,6 @@ dependencies {
     implementation(libs.java.websocket)
     implementation(libs.mlkit.barcode.scanning)
     implementation("com.google.mlkit:digital-ink-recognition:19.0.0")
+    implementation(platform(libs.firebase.bom))
+    implementation(libs.firebase.firestore)
 }

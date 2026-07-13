@@ -20,10 +20,11 @@ fun spawnSyncNode(
     parent: Node,
     sprayMaterialInstance: MaterialInstance,
     sprayColor: Color,
-    duckModel: ModelNode?,
-    avocadoModel: ModelNode?,
-    foxModel: ModelNode?,
-    lanternModel: ModelNode?,
+    eyeModel: ModelNode?,
+    heartModel: ModelNode?,
+    skeletonModel: ModelNode?,
+    skeletonHeadModel: ModelNode?,
+    urinarySystemModel: ModelNode?,
     whiteboardWidth: Float,
     whiteboardHeight: Float,
     whiteboardPaths: List<DrawingStroke>,
@@ -39,9 +40,9 @@ fun spawnSyncNode(
             position = Position(syncNode.posX, syncNode.posY, syncNode.posZ)
         }
         parent.addChildNode(sphereNode)
-    } else if (syncNode.type == "duck") {
-        if (duckModel != null) {
-            val modelInstance = modelLoader.createInstance(duckModel.modelInstance.asset)
+    } else if (syncNode.type == "eye") {
+        if (eyeModel != null) {
+            val modelInstance = modelLoader.createInstance(eyeModel.modelInstance.asset)
             if (modelInstance != null) {
                 val modelNode = ModelNode(modelInstance = modelInstance).apply {
                     scale = io.github.sceneview.math.Scale(0.5f)
@@ -50,34 +51,45 @@ fun spawnSyncNode(
                 parent.addChildNode(modelNode)
             }
         }
-    } else if (syncNode.type == "avocado") {
-        if (avocadoModel != null) {
-            val modelInstance = modelLoader.createInstance(avocadoModel.modelInstance.asset)
-            if (modelInstance != null) {
-                val modelNode = ModelNode(modelInstance = modelInstance).apply {
-                    scale = io.github.sceneview.math.Scale(3.0f)
-                    position = Position(syncNode.posX, syncNode.posY, syncNode.posZ)
-                }
-                parent.addChildNode(modelNode)
-            }
-        }
-    } else if (syncNode.type == "fox") {
-        if (foxModel != null) {
-            val modelInstance = modelLoader.createInstance(foxModel.modelInstance.asset)
-            if (modelInstance != null) {
-                val modelNode = ModelNode(modelInstance = modelInstance).apply {
-                    scale = io.github.sceneview.math.Scale(0.02f)
-                    position = Position(syncNode.posX, syncNode.posY, syncNode.posZ)
-                }
-                parent.addChildNode(modelNode)
-            }
-        }
-    } else if (syncNode.type == "lantern") {
-        if (lanternModel != null) {
-            val modelInstance = modelLoader.createInstance(lanternModel.modelInstance.asset)
+    } else if (syncNode.type == "heart") {
+        if (heartModel != null) {
+            val modelInstance = modelLoader.createInstance(heartModel.modelInstance.asset)
             if (modelInstance != null) {
                 val modelNode = ModelNode(modelInstance = modelInstance).apply {
                     scale = io.github.sceneview.math.Scale(0.5f)
+                    position = Position(syncNode.posX, syncNode.posY, syncNode.posZ)
+                }
+                parent.addChildNode(modelNode)
+            }
+        }
+    } else if (syncNode.type == "skeleton") {
+        if (skeletonModel != null) {
+            val modelInstance = modelLoader.createInstance(skeletonModel.modelInstance.asset)
+            if (modelInstance != null) {
+                val modelNode = ModelNode(modelInstance = modelInstance).apply {
+                    scale = io.github.sceneview.math.Scale(0.15f)
+                    position = Position(syncNode.posX, syncNode.posY, syncNode.posZ)
+                }
+                parent.addChildNode(modelNode)
+            }
+        }
+    } else if (syncNode.type == "skeleton_head") {
+        if (skeletonHeadModel != null) {
+            val modelInstance = modelLoader.createInstance(skeletonHeadModel.modelInstance.asset)
+            if (modelInstance != null) {
+                val modelNode = ModelNode(modelInstance = modelInstance).apply {
+                    scale = io.github.sceneview.math.Scale(0.3f)
+                    position = Position(syncNode.posX, syncNode.posY, syncNode.posZ)
+                }
+                parent.addChildNode(modelNode)
+            }
+        }
+    } else if (syncNode.type == "urinary_system") {
+        if (urinarySystemModel != null) {
+            val modelInstance = modelLoader.createInstance(urinarySystemModel.modelInstance.asset)
+            if (modelInstance != null) {
+                val modelNode = ModelNode(modelInstance = modelInstance).apply {
+                    scale = io.github.sceneview.math.Scale(0.2f)
                     position = Position(syncNode.posX, syncNode.posY, syncNode.posZ)
                 }
                 parent.addChildNode(modelNode)

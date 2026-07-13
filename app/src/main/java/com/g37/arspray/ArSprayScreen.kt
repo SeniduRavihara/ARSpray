@@ -52,7 +52,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
-import com.g37.arspray.ar.ArSyncClient
+import com.g37.arspray.ar.ArFirebaseSync
 import com.g37.arspray.ar.ArSyncNode
 import com.g37.arspray.ar.configureArSession
 import com.g37.arspray.ar.generateQrCode
@@ -106,14 +106,19 @@ fun ArSprayScreen() {
     when (appMode) {
         ArAppMode.LOBBY -> LobbyScreen(
             onSoloMode = { appMode = ArAppMode.SOLO },
-            onHostMode = { appMode = ArAppMode.HOST_LOBBY },
+            onHostMode = { 
+                activeRoomId = (1..6).map { ('A'..'Z').random() }.joinToString("")
+                appMode = ArAppMode.HOST_LOBBY 
+            },
             onJoinMode = { appMode = ArAppMode.JOIN_LOBBY }
         )
         ArAppMode.HOST_LOBBY -> HostLobbyScreen(
-            serverIp = serverIp,
-            onServerIpChange = { serverIp = it },
+            roomId = activeRoomId ?: "",
             onStartHosting = { appMode = ArAppMode.HOST_ACTIVE },
-            onBack = { appMode = ArAppMode.LOBBY }
+            onBack = { 
+                activeRoomId = null
+                appMode = ArAppMode.LOBBY 
+            }
         )
         ArAppMode.JOIN_LOBBY -> JoinLobbyScreen(
             onScanQr = { appMode = ArAppMode.JOIN_SCANNING },
@@ -121,15 +126,9 @@ fun ArSprayScreen() {
         )
         ArAppMode.JOIN_SCANNING -> CameraScanner(
             onBarcodeScanned = { barcodeText ->
-                try {
-                    val parts = barcodeText.split("|")
-                    if (parts.size == 2) {
-                        serverIp = parts[0]
-                        activeRoomId = parts[1]
-                        appMode = ArAppMode.JOIN_ACTIVE
-                    }
-                } catch (e: Exception) {
-                    e.printStackTrace()
+                if (barcodeText.isNotEmpty()) {
+                    activeRoomId = barcodeText.trim()
+                    appMode = ArAppMode.JOIN_ACTIVE
                 }
             }
         )
@@ -167,13 +166,14 @@ fun ArActiveScreen(
     var frame by remember { mutableStateOf<Frame?>(null) }
     var arSession by remember { mutableStateOf<Session?>(null) }
     var isModelLoading by remember { mutableStateOf(true) }
-    var duckModel by remember { mutableStateOf<ModelNode?>(null) }
-    var avocadoModel by remember { mutableStateOf<ModelNode?>(null) }
-    var foxModel by remember { mutableStateOf<ModelNode?>(null) }
-    var lanternModel by remember { mutableStateOf<ModelNode?>(null) }
+    var eyeModel by remember { mutableStateOf<ModelNode?>(null) }
+    var heartModel by remember { mutableStateOf<ModelNode?>(null) }
+    var skeletonModel by remember { mutableStateOf<ModelNode?>(null) }
+    var skeletonHeadModel by remember { mutableStateOf<ModelNode?>(null) }
+    var urinarySystemModel by remember { mutableStateOf<ModelNode?>(null) }
 
     // --- Drawing state ---
-    var isSprayMode by remember { mutableStateOf(true) }
+    var isSprayMode by remember { mutableStateOf(false) }
     val sprayColor = Color.Magenta
     var brushSize by remember { mutableFloatStateOf(0.02f) }
     // Cache a single material instance for ALL spray spheres — creating one per sphere
@@ -263,7 +263,7 @@ fun ArActiveScreen(
     var currentStrokeBuilder by remember { mutableStateOf<Ink.Stroke.Builder?>(null) }
 
     // --- Selected Object Mode Type ---
-    var selectedObjectType by remember { mutableStateOf(ArObjectType.DUCK) }
+    var selectedObjectType by remember { mutableStateOf(ArObjectType.EYE) }
 
     // Automatically update whiteboard dimensions, transparency, rotation, distance, and redraw paths
     LaunchedEffect(
@@ -331,12 +331,163 @@ fun ArActiveScreen(
     var connectionState by remember { mutableStateOf(false) }
     var syncStatusText by remember { mutableStateOf<String?>(null) }
     var showQrDialog by remember { mutableStateOf(false) }
-    var syncClient by remember { mutableStateOf<ArSyncClient?>(null) }
+    var firebaseSync by remember { mutableStateOf<ArFirebaseSync?>(null) }
 
-    // Safely disconnect WebSocket when composable is destroyed
-    DisposableEffect(syncClient) {
+    // Safely stop Firestore listener when composable is destroyed
+    DisposableEffect(firebaseSync) {
         onDispose {
-            syncClient?.disconnect()
+            firebaseSync?.stopListener()
+        }
+    }
+
+    // Host room initialization and listener setup
+    DisposableEffect(activeRoomId) {
+        val id = activeRoomId
+        var sync: ArFirebaseSync? = null
+        if (appMode == ArAppMode.HOST_ACTIVE && id != null) {
+            syncStatusText = "Initializing Shared Room..."
+            val activeSync = ArFirebaseSync(id)
+            sync = activeSync
+            activeSync.initializeRoom { success ->
+                if (success) {
+                    syncStatusText = "Shared Room Initialized."
+                    activeSync.startListener(
+                        onNodeReceived = { syncNode ->
+                            val parentNode = whiteboardNode ?: sharedBaseNode
+                            if (parentNode != null) {
+                                spawnSyncNode(
+                                    engine = engine,
+                                    materialLoader = materialLoader,
+                                    modelLoader = modelLoader,
+                                    syncNode = syncNode,
+                                    parent = parentNode,
+                                    sprayMaterialInstance = sprayMaterialInstance,
+                                    sprayColor = sprayColor,
+                                    eyeModel = eyeModel,
+                                    heartModel = heartModel,
+                                    skeletonModel = skeletonModel,
+                                    skeletonHeadModel = skeletonHeadModel,
+                                    urinarySystemModel = urinarySystemModel,
+                                    whiteboardWidth = whiteboardWidth,
+                                    whiteboardHeight = whiteboardHeight,
+                                    whiteboardPaths = whiteboardPaths,
+                                    onPathsChanged = { whiteboardPaths = it }
+                                )
+                            }
+                        },
+                        onPathsChanged = { paths ->
+                            whiteboardPaths = paths
+                        },
+                        onRoomCleared = {
+                            whiteboardNode?.clearChildNodes()
+                            sharedBaseNode?.clearChildNodes()
+                            inkBuilder = Ink.builder()
+                            currentStrokeBuilder = null
+                        },
+                        onConnectionStateChanged = { connected ->
+                            connectionState = connected
+                        },
+                        onAnchorIdReceived = {}
+                    )
+                    firebaseSync = activeSync
+                } else {
+                    syncStatusText = "Failed to initialize Firebase Room."
+                }
+            }
+        }
+        onDispose {
+            sync?.stopListener()
+        }
+    }
+
+    // Guest listener setup (resolves anchor dynamically once host publishes it)
+    DisposableEffect(activeRoomId, arSession) {
+        val id = activeRoomId
+        val sess = arSession
+        var sync: ArFirebaseSync? = null
+        if (appMode == ArAppMode.JOIN_ACTIVE && id != null) {
+            syncStatusText = "Connecting to Shared Room..."
+            val activeSync = ArFirebaseSync(id)
+            sync = activeSync
+            activeSync.startListener(
+                onNodeReceived = { syncNode ->
+                    val parentNode = whiteboardNode ?: sharedBaseNode
+                    if (parentNode != null) {
+                        spawnSyncNode(
+                            engine = engine,
+                            materialLoader = materialLoader,
+                            modelLoader = modelLoader,
+                            syncNode = syncNode,
+                            parent = parentNode,
+                            sprayMaterialInstance = sprayMaterialInstance,
+                            sprayColor = sprayColor,
+                            eyeModel = eyeModel,
+                            heartModel = heartModel,
+                            skeletonModel = skeletonModel,
+                            skeletonHeadModel = skeletonHeadModel,
+                            urinarySystemModel = urinarySystemModel,
+                            whiteboardWidth = whiteboardWidth,
+                            whiteboardHeight = whiteboardHeight,
+                            whiteboardPaths = whiteboardPaths,
+                            onPathsChanged = { whiteboardPaths = it }
+                        )
+                    }
+                },
+                onPathsChanged = { paths ->
+                    whiteboardPaths = paths
+                },
+                onRoomCleared = {
+                    whiteboardNode?.clearChildNodes()
+                    sharedBaseNode?.clearChildNodes()
+                    inkBuilder = Ink.builder()
+                    currentStrokeBuilder = null
+                },
+                onConnectionStateChanged = { connected ->
+                    connectionState = connected
+                },
+                onAnchorIdReceived = { cloudAnchorId ->
+                    val s = arSession
+                    if (s != null && sharedBaseNode == null && !isResolvingStarted) {
+                        isResolvingStarted = true
+                        syncStatusText = "Resolving Shared Anchor..."
+                        CloudAnchorNode.resolve(engine, s, cloudAnchorId) { state, resolvedNode ->
+                            if (state == Anchor.CloudAnchorState.SUCCESS && resolvedNode != null) {
+                                sharedBaseNode = resolvedNode
+                                childNodes += resolvedNode
+                                syncStatusText = null
+                                
+                                val board = if (isWhiteboardMode) {
+                                    val matInstance = getOrCreateWhiteboardMaterial()
+                                    CubeNode(
+                                        engine = engine,
+                                        materialInstance = matInstance
+                                    ).apply {
+                                        scale = io.github.sceneview.math.Scale(whiteboardWidth, whiteboardHeight, 0.02f)
+                                        lookAt(cameraNode.worldPosition)
+                                        val rot = rotation
+                                        whiteboardYaw = rot.y
+                                        whiteboardPitch = rot.x
+                                        whiteboardRoll = rot.z
+                                        position = Position(0f, 0f, whiteboardDistance)
+                                    }
+                                } else null
+                                
+                                if (board != null) {
+                                    whiteboardNode = board
+                                    resolvedNode.addChildNode(board)
+                                }
+                            } else if (state.isError) {
+                                syncStatusText = "Resolving failed: $state"
+                                isResolvingStarted = false
+                            }
+                        }
+                    }
+                }
+            )
+            firebaseSync = activeSync
+        }
+        onDispose {
+            sync?.stopListener()
         }
     }
 
@@ -391,7 +542,7 @@ fun ArActiveScreen(
                             scale = brushSize,
                             colorHex = "#FF00FF"
                         )
-                        syncClient?.sendNode(syncNode)
+                        firebaseSync?.sendNode(syncNode)
                     }
                 }
             }
@@ -417,32 +568,39 @@ fun ArActiveScreen(
     LaunchedEffect(modelLoader) {
         isModelLoading = true
         try {
-            val model = modelLoader.loadModel("models/duck.glb")
-            duckModel = if (model != null) {
-                ModelNode(modelInstance = modelLoader.createInstance(model)!!)
+            val eM = modelLoader.loadModel("models/eye.glb")
+            eyeModel = if (eM != null) {
+                ModelNode(modelInstance = modelLoader.createInstance(eM)!!)
             } else {
-                Toast.makeText(context, "Model not found in assets/models/duck.glb", Toast.LENGTH_LONG).show()
+                Toast.makeText(context, "Model not found in assets/models/eye.glb", Toast.LENGTH_LONG).show()
                 null
             }
-            val aModel = modelLoader.loadModel("models/avocado.glb")
-            avocadoModel = if (aModel != null) {
-                ModelNode(modelInstance = modelLoader.createInstance(aModel)!!)
+            val hM = modelLoader.loadModel("models/heart.glb")
+            heartModel = if (hM != null) {
+                ModelNode(modelInstance = modelLoader.createInstance(hM)!!)
             } else {
-                Toast.makeText(context, "Model not found in assets/models/avocado.glb", Toast.LENGTH_LONG).show()
+                Toast.makeText(context, "Model not found in assets/models/heart.glb", Toast.LENGTH_LONG).show()
                 null
             }
-            val fModel = modelLoader.loadModel("models/fox.glb")
-            foxModel = if (fModel != null) {
-                ModelNode(modelInstance = modelLoader.createInstance(fModel)!!)
+            val sM = modelLoader.loadModel("models/human_skeleton.glb")
+            skeletonModel = if (sM != null) {
+                ModelNode(modelInstance = modelLoader.createInstance(sM)!!)
             } else {
-                Toast.makeText(context, "Model not found in assets/models/fox.glb", Toast.LENGTH_LONG).show()
+                Toast.makeText(context, "Model not found in assets/models/human_skeleton.glb", Toast.LENGTH_LONG).show()
                 null
             }
-            val lModel = modelLoader.loadModel("models/lantern.glb")
-            lanternModel = if (lModel != null) {
-                ModelNode(modelInstance = modelLoader.createInstance(lModel)!!)
+            val shM = modelLoader.loadModel("models/skeleton_head.glb")
+            skeletonHeadModel = if (shM != null) {
+                ModelNode(modelInstance = modelLoader.createInstance(shM)!!)
             } else {
-                Toast.makeText(context, "Model not found in assets/models/lantern.glb", Toast.LENGTH_LONG).show()
+                Toast.makeText(context, "Model not found in assets/models/skeleton_head.glb", Toast.LENGTH_LONG).show()
+                null
+            }
+            val uM = modelLoader.loadModel("models/urinary_system.glb")
+            urinarySystemModel = if (uM != null) {
+                ModelNode(modelInstance = modelLoader.createInstance(uM)!!)
+            } else {
+                Toast.makeText(context, "Model not found in assets/models/urinary_system.glb", Toast.LENGTH_LONG).show()
                 null
             }
         } catch (e: Exception) {
@@ -454,6 +612,18 @@ fun ArActiveScreen(
 
     // --- Layout ---
     Box(modifier = Modifier.fillMaxSize()) {
+
+        // Small Logout Button in Top-Left Corner
+        Button(
+            onClick = onExit,
+            colors = ButtonDefaults.buttonColors(containerColor = Color.Red.copy(alpha = 0.7f)),
+            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+            modifier = Modifier
+                .align(Alignment.TopStart)
+                .padding(top = 16.dp, start = 16.dp)
+        ) {
+            Text("Logout", color = Color.White, fontSize = 12.sp)
+        }
 
         ARScene(
             modifier = Modifier.fillMaxSize(),
@@ -473,84 +643,6 @@ fun ArActiveScreen(
             onSessionUpdated = { session, updatedFrame ->
                 frame = updatedFrame
                 arSession = session
-
-                // Auto-resolve cloud anchor once guest session starts
-                if (appMode == ArAppMode.JOIN_ACTIVE && sharedBaseNode == null && !isResolvingStarted && activeRoomId != null) {
-                    isResolvingStarted = true
-                    syncStatusText = "Resolving Shared Anchor..."
-                    
-                    CloudAnchorNode.resolve(engine, session, activeRoomId!!) { state, resolvedNode ->
-                        if (state == Anchor.CloudAnchorState.SUCCESS && resolvedNode != null) {
-                            sharedBaseNode = resolvedNode
-                            childNodes += resolvedNode
-                            syncStatusText = null
-                            
-                            val board = if (isWhiteboardMode) {
-                                val matInstance = getOrCreateWhiteboardMaterial()
-                                CubeNode(
-                                    engine = engine,
-                                    materialInstance = matInstance
-                                ).apply {
-                                    scale = io.github.sceneview.math.Scale(whiteboardWidth, whiteboardHeight, 0.02f)
-                                    lookAt(cameraNode.worldPosition)
-                                    val rot = rotation
-                                    whiteboardYaw = rot.y
-                                    whiteboardPitch = rot.x
-                                    whiteboardRoll = rot.z
-                                    position = Position(0f, 0f, whiteboardDistance)
-                                }
-                            } else null
-                            
-                            if (board != null) {
-                                whiteboardNode = board
-                                resolvedNode.addChildNode(board)
-                            }
-                            
-                            // Initialize guest socket client
-                            val uri = URI("ws://$serverIp:8080")
-                            val client = ArSyncClient(
-                                serverUri = uri,
-                                roomId = activeRoomId!!,
-                                onNodeReceived = { syncNode ->
-                                    spawnSyncNode(
-                                        engine = engine,
-                                        materialLoader = materialLoader,
-                                        modelLoader = modelLoader,
-                                        syncNode = syncNode,
-                                        parent = board ?: resolvedNode,
-                                        sprayMaterialInstance = sprayMaterialInstance,
-                                        sprayColor = sprayColor,
-                                        duckModel = duckModel,
-                                        avocadoModel = avocadoModel,
-                                        foxModel = foxModel,
-                                        lanternModel = lanternModel,
-                                        whiteboardWidth = whiteboardWidth,
-                                        whiteboardHeight = whiteboardHeight,
-                                        whiteboardPaths = whiteboardPaths,
-                                        onPathsChanged = { whiteboardPaths = it }
-                                    )
-                                },
-                                onRoomCleared = {
-                                    if (board != null) {
-                                        board.clearChildNodes()
-                                    } else {
-                                        resolvedNode.clearChildNodes()
-                                    }
-                                    inkBuilder = Ink.builder()
-                                    currentStrokeBuilder = null
-                                },
-                                onConnectionStateChanged = { connected ->
-                                    connectionState = connected
-                                }
-                            )
-                            syncClient = client
-                            client.connect()
-                        } else if (state.isError) {
-                            syncStatusText = "Resolving failed: $state"
-                            isResolvingStarted = false
-                        }
-                    }
-                }
             },
             onGestureListener = rememberOnGestureListener(
                 onSingleTapConfirmed = { motionEvent, tappedNode ->
@@ -606,45 +698,9 @@ fun ArActiveScreen(
                                         syncStatusText = "Hosting Shared Anchor with Whiteboard..."
                                         cloudAnchor.host(session) { anchorId, state ->
                                             if (state == Anchor.CloudAnchorState.SUCCESS && anchorId != null) {
-                                                activeRoomId = anchorId
                                                 sharedBaseNode = cloudAnchor
                                                 syncStatusText = null
-
-                                                // Initialize host socket client
-                                                val uri = URI("ws://$serverIp:8080")
-                                                val client = ArSyncClient(
-                                                    serverUri = uri,
-                                                    roomId = anchorId,
-                                                    onNodeReceived = { syncNode ->
-                                                        spawnSyncNode(
-                                                            engine = engine,
-                                                            materialLoader = materialLoader,
-                                                            modelLoader = modelLoader,
-                                                            syncNode = syncNode,
-                                                            parent = board,
-                                                            sprayMaterialInstance = sprayMaterialInstance,
-                                                            sprayColor = sprayColor,
-                                                            duckModel = duckModel,
-                                                            avocadoModel = avocadoModel,
-                                                            foxModel = foxModel,
-                                                            lanternModel = lanternModel,
-                                                            whiteboardWidth = whiteboardWidth,
-                                                            whiteboardHeight = whiteboardHeight,
-                                                            whiteboardPaths = whiteboardPaths,
-                                                            onPathsChanged = { whiteboardPaths = it }
-                                                        )
-                                                    },
-                                                    onRoomCleared = {
-                                                        board.clearChildNodes()
-                                                        inkBuilder = Ink.builder()
-                                                        currentStrokeBuilder = null
-                                                    },
-                                                    onConnectionStateChanged = { connected ->
-                                                        connectionState = connected
-                                                    }
-                                                )
-                                                syncClient = client
-                                                client.connect()
+                                                firebaseSync?.updateAnchorId(anchorId)
                                             } else {
                                                 syncStatusText = "Hosting failed: $state"
                                             }
@@ -682,8 +738,8 @@ fun ArActiveScreen(
                                         localPos.y >= -halfHeight && localPos.y <= halfHeight
                                     ) {
                                         val spawnedNode = when (selectedObjectType) {
-                                            ArObjectType.DUCK -> {
-                                                val currentModel = duckModel
+                                            ArObjectType.EYE -> {
+                                                val currentModel = eyeModel
                                                 val modelInstance = currentModel?.let { modelLoader.createInstance(it.modelInstance.asset) }
                                                 if (modelInstance != null) {
                                                     ModelNode(modelInstance = modelInstance).apply {
@@ -692,32 +748,42 @@ fun ArActiveScreen(
                                                     }
                                                 } else null
                                             }
-                                            ArObjectType.AVOCADO -> {
-                                                val currentModel = avocadoModel
-                                                val modelInstance = currentModel?.let { modelLoader.createInstance(it.modelInstance.asset) }
-                                                if (modelInstance != null) {
-                                                    ModelNode(modelInstance = modelInstance).apply {
-                                                        scale = io.github.sceneview.math.Scale(3.0f)
-                                                        position = Position(localPos.x, localPos.y, 0f)
-                                                    }
-                                                } else null
-                                            }
-                                            ArObjectType.FOX -> {
-                                                val currentModel = foxModel
-                                                val modelInstance = currentModel?.let { modelLoader.createInstance(it.modelInstance.asset) }
-                                                if (modelInstance != null) {
-                                                    ModelNode(modelInstance = modelInstance).apply {
-                                                        scale = io.github.sceneview.math.Scale(0.02f)
-                                                        position = Position(localPos.x, localPos.y, 0f)
-                                                    }
-                                                } else null
-                                            }
-                                            ArObjectType.LANTERN -> {
-                                                val currentModel = lanternModel
+                                            ArObjectType.HEART -> {
+                                                val currentModel = heartModel
                                                 val modelInstance = currentModel?.let { modelLoader.createInstance(it.modelInstance.asset) }
                                                 if (modelInstance != null) {
                                                     ModelNode(modelInstance = modelInstance).apply {
                                                         scale = io.github.sceneview.math.Scale(0.5f)
+                                                        position = Position(localPos.x, localPos.y, 0f)
+                                                    }
+                                                } else null
+                                            }
+                                            ArObjectType.SKELETON -> {
+                                                val currentModel = skeletonModel
+                                                val modelInstance = currentModel?.let { modelLoader.createInstance(it.modelInstance.asset) }
+                                                if (modelInstance != null) {
+                                                    ModelNode(modelInstance = modelInstance).apply {
+                                                        scale = io.github.sceneview.math.Scale(0.15f)
+                                                        position = Position(localPos.x, localPos.y, 0f)
+                                                    }
+                                                } else null
+                                            }
+                                            ArObjectType.SKELETON_HEAD -> {
+                                                val currentModel = skeletonHeadModel
+                                                val modelInstance = currentModel?.let { modelLoader.createInstance(it.modelInstance.asset) }
+                                                if (modelInstance != null) {
+                                                    ModelNode(modelInstance = modelInstance).apply {
+                                                        scale = io.github.sceneview.math.Scale(0.3f)
+                                                        position = Position(localPos.x, localPos.y, 0f)
+                                                    }
+                                                } else null
+                                            }
+                                            ArObjectType.URINARY_SYSTEM -> {
+                                                val currentModel = urinarySystemModel
+                                                val modelInstance = currentModel?.let { modelLoader.createInstance(it.modelInstance.asset) }
+                                                if (modelInstance != null) {
+                                                    ModelNode(modelInstance = modelInstance).apply {
+                                                        scale = io.github.sceneview.math.Scale(0.2f)
                                                         position = Position(localPos.x, localPos.y, 0f)
                                                     }
                                                 } else null
@@ -748,10 +814,11 @@ fun ArActiveScreen(
                                             if (appMode != ArAppMode.SOLO) {
                                                 val syncNode = ArSyncNode(
                                                     type = when (selectedObjectType) {
-                                                        ArObjectType.DUCK -> "duck"
-                                                        ArObjectType.AVOCADO -> "avocado"
-                                                        ArObjectType.FOX -> "fox"
-                                                        ArObjectType.LANTERN -> "lantern"
+                                                        ArObjectType.EYE -> "eye"
+                                                        ArObjectType.HEART -> "heart"
+                                                        ArObjectType.SKELETON -> "skeleton"
+                                                        ArObjectType.SKELETON_HEAD -> "skeleton_head"
+                                                        ArObjectType.URINARY_SYSTEM -> "urinary_system"
                                                         ArObjectType.CUBE -> "cube"
                                                         ArObjectType.SPHERE -> "sphere_object"
                                                     },
@@ -761,7 +828,7 @@ fun ArActiveScreen(
                                                     scale = 0.5f,
                                                     colorHex = ""
                                                 )
-                                                syncClient?.sendNode(syncNode)
+                                                firebaseSync?.sendNode(syncNode)
                                             }
                                         }
                                     }
@@ -786,44 +853,11 @@ fun ArActiveScreen(
                                 syncStatusText = "Hosting Shared Anchor..."
 
                                 cloudAnchor.host(session) { anchorId, state ->
-                                    if (state == Anchor.CloudAnchorState.SUCCESS && anchorId != null) {
-                                        activeRoomId = anchorId
-                                        sharedBaseNode = cloudAnchor
-                                        syncStatusText = null
-
-                                        // Initialize host socket client
-                                        val uri = URI("ws://$serverIp:8080")
-                                        val client = ArSyncClient(
-                                            serverUri = uri,
-                                            roomId = anchorId,
-                                            onNodeReceived = { syncNode ->
-                                                spawnSyncNode(
-                                                    engine = engine,
-                                                    materialLoader = materialLoader,
-                                                    modelLoader = modelLoader,
-                                                    syncNode = syncNode,
-                                                    parent = sharedBaseNode ?: cloudAnchor,
-                                                    sprayMaterialInstance = sprayMaterialInstance,
-                                                    sprayColor = sprayColor,
-                                                    duckModel = duckModel,
-                                                    avocadoModel = avocadoModel,
-                                                    foxModel = foxModel,
-                                                    lanternModel = lanternModel,
-                                                    whiteboardWidth = whiteboardWidth,
-                                                    whiteboardHeight = whiteboardHeight,
-                                                    whiteboardPaths = whiteboardPaths,
-                                                    onPathsChanged = { whiteboardPaths = it }
-                                                )
-                                            },
-                                            onRoomCleared = {
-                                                sharedBaseNode?.clearChildNodes()
-                                            },
-                                            onConnectionStateChanged = { connected ->
-                                                connectionState = connected
-                                            }
-                                        )
-                                        syncClient = client
-                                        client.connect()
+                                     if (state == Anchor.CloudAnchorState.SUCCESS && anchorId != null) {
+                                         sharedBaseNode = cloudAnchor
+                                         syncStatusText = null
+                                         firebaseSync?.updateAnchorId(anchorId)
+                                     
                                     } else {
                                         syncStatusText = "Hosting failed: $state"
                                     }
@@ -845,47 +879,58 @@ fun ArActiveScreen(
 
                                 hitResult?.createAnchorOrNull()?.let { anchor ->
                                     val targetNode = when (selectedObjectType) {
-                                        ArObjectType.DUCK -> {
-                                            val currentModel = duckModel
+                                        ArObjectType.EYE -> {
+                                            val currentModel = eyeModel
                                             if (currentModel != null) {
                                                 val modelInstance = modelLoader.createInstance(currentModel.modelInstance.asset)
                                                 if (modelInstance != null) {
-                                                    ModelNode(modelInstance = modelInstance).apply {
-                                                        scale = io.github.sceneview.math.Scale(0.5f)
-                                                    }
+                                                     ModelNode(modelInstance = modelInstance).apply {
+                                                         scale = io.github.sceneview.math.Scale(0.5f)
+                                                     }
                                                 } else null
                                             } else null
                                         }
-                                        ArObjectType.AVOCADO -> {
-                                            val currentModel = avocadoModel
+                                        ArObjectType.HEART -> {
+                                            val currentModel = heartModel
                                             if (currentModel != null) {
                                                 val modelInstance = modelLoader.createInstance(currentModel.modelInstance.asset)
                                                 if (modelInstance != null) {
-                                                    ModelNode(modelInstance = modelInstance).apply {
-                                                        scale = io.github.sceneview.math.Scale(3.0f)
-                                                    }
+                                                     ModelNode(modelInstance = modelInstance).apply {
+                                                         scale = io.github.sceneview.math.Scale(0.5f)
+                                                     }
                                                 } else null
                                             } else null
                                         }
-                                        ArObjectType.FOX -> {
-                                            val currentModel = foxModel
+                                        ArObjectType.SKELETON -> {
+                                            val currentModel = skeletonModel
                                             if (currentModel != null) {
                                                 val modelInstance = modelLoader.createInstance(currentModel.modelInstance.asset)
                                                 if (modelInstance != null) {
-                                                    ModelNode(modelInstance = modelInstance).apply {
-                                                        scale = io.github.sceneview.math.Scale(0.02f)
-                                                    }
+                                                     ModelNode(modelInstance = modelInstance).apply {
+                                                         scale = io.github.sceneview.math.Scale(0.15f)
+                                                     }
                                                 } else null
                                             } else null
                                         }
-                                        ArObjectType.LANTERN -> {
-                                            val currentModel = lanternModel
+                                        ArObjectType.SKELETON_HEAD -> {
+                                            val currentModel = skeletonHeadModel
                                             if (currentModel != null) {
                                                 val modelInstance = modelLoader.createInstance(currentModel.modelInstance.asset)
                                                 if (modelInstance != null) {
-                                                    ModelNode(modelInstance = modelInstance).apply {
-                                                        scale = io.github.sceneview.math.Scale(0.5f)
-                                                    }
+                                                     ModelNode(modelInstance = modelInstance).apply {
+                                                         scale = io.github.sceneview.math.Scale(0.3f)
+                                                     }
+                                                } else null
+                                            } else null
+                                        }
+                                        ArObjectType.URINARY_SYSTEM -> {
+                                            val currentModel = urinarySystemModel
+                                            if (currentModel != null) {
+                                                val modelInstance = modelLoader.createInstance(currentModel.modelInstance.asset)
+                                                if (modelInstance != null) {
+                                                     ModelNode(modelInstance = modelInstance).apply {
+                                                         scale = io.github.sceneview.math.Scale(0.2f)
+                                                     }
                                                 } else null
                                             } else null
                                         }
@@ -921,10 +966,11 @@ fun ArActiveScreen(
                                                 val relativePos = targetNode.position
                                                 val syncNode = ArSyncNode(
                                                     type = when (selectedObjectType) {
-                                                        ArObjectType.DUCK -> "duck"
-                                                        ArObjectType.AVOCADO -> "avocado"
-                                                        ArObjectType.FOX -> "fox"
-                                                        ArObjectType.LANTERN -> "lantern"
+                                                        ArObjectType.EYE -> "eye"
+                                                        ArObjectType.HEART -> "heart"
+                                                        ArObjectType.SKELETON -> "skeleton"
+                                                        ArObjectType.SKELETON_HEAD -> "skeleton_head"
+                                                         ArObjectType.URINARY_SYSTEM -> "urinary_system"
                                                         ArObjectType.CUBE -> "cube"
                                                         ArObjectType.SPHERE -> "sphere_object"
                                                     },
@@ -934,7 +980,7 @@ fun ArActiveScreen(
                                                     scale = 0.5f,
                                                     colorHex = ""
                                                 )
-                                                syncClient?.sendNode(syncNode)
+                                                firebaseSync?.sendNode(syncNode)
                                             }
                                         }
                                     }
@@ -1035,12 +1081,7 @@ fun ArActiveScreen(
                 }
             }
 
-            StatusOverlay(
-                isSprayMode = isSprayMode,
-                selectedObjectType = selectedObjectType,
-                isWhiteboardMode = isWhiteboardMode,
-                modifier = Modifier
-            )
+
         }
 
         if (isModelLoading) {
@@ -1064,13 +1105,13 @@ fun ArActiveScreen(
                     if (appMode == ArAppMode.SOLO) {
                         whiteboardNode?.clearChildNodes()
                     } else {
-                        syncClient?.sendClear()
+                        firebaseSync?.sendClear()
                     }
                     inkBuilder = Ink.builder()
                     whiteboardPaths = emptyList()
                 },
                 onSuccess = { centerX, centerY ->
-                    val currentModel = duckModel
+                    val currentModel = eyeModel
                     val board = whiteboardNode
                     if (currentModel != null && board != null) {
                         val modelInstance = modelLoader.createInstance(currentModel.modelInstance.asset)
@@ -1083,14 +1124,14 @@ fun ArActiveScreen(
 
                             if (appMode != ArAppMode.SOLO) {
                                 val syncNode = ArSyncNode(
-                                    type = "duck",
+                                    type = "eye",
                                     posX = centerX,
                                     posY = centerY,
                                     posZ = 0f,
                                     scale = 0.5f,
                                     colorHex = ""
                                 )
-                                syncClient?.sendNode(syncNode)
+                                firebaseSync?.sendNode(syncNode)
                             }
                         }
                     }
@@ -1120,7 +1161,7 @@ fun ArActiveScreen(
                             childNodes.clear()
                         }
                     } else {
-                        syncClient?.sendClear()
+                        firebaseSync?.sendClear()
                     }
                 },
                 isWhiteboardMode = isWhiteboardMode,
@@ -1153,17 +1194,7 @@ fun ArActiveScreen(
                 selectedObjectType = selectedObjectType,
                 onObjectTypeChange = { selectedObjectType = it }
             )
-            
-            Button(
-                onClick = onExit,
-                colors = ButtonDefaults.buttonColors(containerColor = Color.DarkGray),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 24.dp)
-                    .padding(bottom = 16.dp)
-            ) {
-                Text("Exit Session")
-            }
+
         }
 
         // Host QR Code Dialog overlay
@@ -1225,7 +1256,7 @@ fun ArActiveScreen(
             whiteboardHeight = whiteboardHeight,
             sprayColor = sprayColor,
             appMode = appMode,
-            syncClient = syncClient,
+            firebaseSync = firebaseSync,
             whiteboardPaths = whiteboardPaths,
             onPathsChanged = { whiteboardPaths = it },
             onClearAll = {
@@ -1244,22 +1275,12 @@ fun ArActiveScreen(
                     updateTextureFromBitmap(bmp, tex)
                 }
                 if (appMode != ArAppMode.SOLO) {
-                    syncClient?.sendClear()
+                    firebaseSync?.sendClear()
                 }
             },
             onClose = { isEditCanvasOpen = false }
         )
 
-        // Version Indicator Overlay
-        Text(
-            text = "v1.2.0",
-            color = Color.White.copy(alpha = 0.5f),
-            fontSize = 11.sp,
-            modifier = Modifier
-                .align(Alignment.TopEnd)
-                .padding(top = 16.dp, end = 16.dp)
-                .background(Color.Black.copy(alpha = 0.5f), RoundedCornerShape(4.dp))
-                .padding(horizontal = 6.dp, vertical = 2.dp)
-        )
+
     }
 }

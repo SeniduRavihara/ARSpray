@@ -17,6 +17,8 @@ import androidx.compose.ui.Modifier
 import androidx.core.content.ContextCompat
 import com.g37.arspray.ui.PermissionScreen
 import com.g37.arspray.ui.theme.ARSprayTheme
+import com.google.firebase.FirebaseApp
+import com.google.firebase.FirebaseOptions
 
 /**
  * Single-activity entry point.
@@ -35,6 +37,19 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        // Initialize Firebase programmatically using web config keys
+        try {
+            val options = FirebaseOptions.Builder()
+                .setApiKey("AIzaSyDAp_UaaV2H3E-Mb95feP4LOPTetQvUNrw")
+                .setApplicationId("1:843424361604:web:703446234d8f6e971ee6d1")
+                .setProjectId("arspray-97d30")
+                .setStorageBucket("arspray-97d30.firebasestorage.app")
+                .build()
+            FirebaseApp.initializeApp(this, options)
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
 
         hasCameraPermission = ContextCompat.checkSelfPermission(
             this, Manifest.permission.CAMERA

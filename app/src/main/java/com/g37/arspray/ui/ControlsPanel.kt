@@ -19,6 +19,10 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
+import androidx.compose.material3.IconButton
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.layout.size
+import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 // Material icon imports removed for standard lightweight text symbols
@@ -91,13 +95,6 @@ fun ControlsPanel(
             
             Spacer(modifier = Modifier.height(12.dp))
 
-            if (isSprayMode && !isWhiteboardMode) {
-                BrushSizeCard(
-                    brushSize = brushSize,
-                    onBrushSizeChange = onBrushSizeChange
-                )
-                Spacer(modifier = Modifier.height(12.dp))
-            }
 
             if (!isSprayMode && !isWhiteboardMode) {
                 ObjectSelectorCard(
@@ -128,63 +125,58 @@ fun ControlsPanel(
                 Spacer(modifier = Modifier.height(12.dp))
             }
 
-            Column(
+            Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 24.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
+                horizontalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterHorizontally),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                // Whiteboard Mode Toggle Icon Button
+                IconButton(
+                    onClick = {
+                        if (!isWhiteboardMode) {
+                            onToggleWhiteboardMode()
+                        }
+                    },
+                    modifier = Modifier
+                        .size(56.dp)
+                        .background(
+                            color = if (isWhiteboardMode) Color(0xFF4CAF50) else Color.Black.copy(alpha = 0.5f),
+                            shape = CircleShape
+                        )
                 ) {
-                    Button(
-                        onClick = onToggleMode,
-                        modifier = Modifier.weight(1f),
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = if (isSprayMode)
-                                MaterialTheme.colorScheme.secondary
-                            else
-                                MaterialTheme.colorScheme.primary
-                        )
-                    ) {
-                        Text(
-                            text = if (isSprayMode) "Switch to Object" else "Switch to Spray",
-                            maxLines = 1,
-                            style = MaterialTheme.typography.bodyMedium
-                        )
-                    }
-
-                    Button(
-                        onClick = onToggleWhiteboardMode,
-                        modifier = Modifier.weight(1f),
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = if (isWhiteboardMode)
-                                Color(0xFF4CAF50) // Green when active
-                            else
-                                MaterialTheme.colorScheme.surfaceVariant
-                        )
-                    ) {
-                        Text(
-                            text = if (isWhiteboardMode) "Whiteboard: ON" else "Whiteboard: OFF",
-                            maxLines = 1,
-                            style = MaterialTheme.typography.bodyMedium
-                        )
-                    }
+                    Text("📋", fontSize = 24.sp)
                 }
 
-                Button(
-                    onClick = onClearAll,
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = MaterialTheme.colorScheme.error
-                    )
+                // Object Mode Toggle Icon Button
+                IconButton(
+                    onClick = {
+                        if (isWhiteboardMode) {
+                            onToggleWhiteboardMode()
+                        }
+                    },
+                    modifier = Modifier
+                        .size(56.dp)
+                        .background(
+                            color = if (!isWhiteboardMode) MaterialTheme.colorScheme.primary else Color.Black.copy(alpha = 0.5f),
+                            shape = CircleShape
+                        )
                 ) {
-                    Text(
-                        text = "Clear All",
-                        maxLines = 1,
-                        style = MaterialTheme.typography.bodyMedium
-                    )
+                    Text("💀", fontSize = 24.sp)
+                }
+
+                // Trash/Clear All Icon Button
+                IconButton(
+                    onClick = onClearAll,
+                    modifier = Modifier
+                        .size(56.dp)
+                        .background(
+                            color = MaterialTheme.colorScheme.error,
+                            shape = CircleShape
+                        )
+                ) {
+                    Text("🗑️", fontSize = 24.sp, color = Color.White)
                 }
             }
         } else {
@@ -311,51 +303,6 @@ private fun SliderRow(
     }
 }
 
-/**
- * Semi-transparent card with a brush size label and a slider.
- */
-@Composable
-private fun BrushSizeCard(
-    brushSize: Float,
-    onBrushSizeChange: (Float) -> Unit
-) {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 24.dp)
-            .background(Color.Black.copy(alpha = 0.6f), RoundedCornerShape(12.dp))
-            .padding(16.dp),
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(
-                text = "Brush Size",
-                color = Color.White,
-                style = MaterialTheme.typography.titleSmall
-            )
-            Text(
-                text = "%.1f cm".format(brushSize * 100),
-                color = Color.White,
-                style = MaterialTheme.typography.bodyMedium
-            )
-        }
-        Spacer(modifier = Modifier.height(8.dp))
-        Slider(
-            value = brushSize,
-            onValueChange = onBrushSizeChange,
-            valueRange = 0.005f..0.08f,
-            colors = SliderDefaults.colors(
-                thumbColor = MaterialTheme.colorScheme.primary,
-                activeTrackColor = MaterialTheme.colorScheme.primary,
-                inactiveTrackColor = Color.White.copy(alpha = 0.3f)
-            )
-        )
-    }
-}
 
 @Composable
 private fun ObjectSelectorCard(
